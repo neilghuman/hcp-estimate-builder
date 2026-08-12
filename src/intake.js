@@ -10,7 +10,7 @@
 //     so future reports and features slot in without schema rewrites.
 //   - Pure helpers are exported separately from the route wiring so they can be unit-tested.
 
-import { listEmployees, searchCustomers, getCustomer, listTags, createCustomer, updateCustomer, ensureCustomerAddress, applyCustomerTag, createEmptyEstimate, appendCustomerNote } from './hcp.js';
+import { listEmployees, searchCustomers, getCustomer, listTags, createCustomer, ensureCustomerAddress, applyCustomerTag, createEmptyEstimate, appendCustomerNote } from './hcp.js';
 import * as chatwoot from './chatwoot.js';
 
 // Columns a client may set on a draft. Anything not in this list is ignored (defence in depth:
@@ -561,12 +561,11 @@ export function logIntakeError(row, stage, error, context = {}) {
 // Each step is safe to re-run: it reuses an already-set id / marker instead of creating duplicates.
 
 // Ensure the customer exists in HCP (link / reuse-found / create) and apply the tag. Idempotent.
-// NEW: Also syncs address changes to existing customers.
 export async function ensureCustomer(pool, row, { tag = row.customer_tag || null } = {}) {
   let action;
   let hcpId;
   let tags = null;
-  
+
   if (row.hcp_customer_id) {
     action = 'link-existing';
     hcpId = row.hcp_customer_id;

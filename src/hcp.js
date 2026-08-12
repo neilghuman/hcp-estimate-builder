@@ -251,7 +251,7 @@ export async function ensureCustomerAddress(customerId, addr) {
     address_id: created.id,
     street: created.street,
     city: created.city,
-    replaced_count: existing.length,
+    existing_count: existing.length,
   });
   return created;
 }
