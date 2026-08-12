@@ -1,0 +1,3 @@
+id,category,name,description,unit_price,unit_of_measure,kind,taxable,sort_order,notes,AI description,internal_scope,exclusions,recommended_notes,ai_status
+125,Bed & Mulch,Mulch Application,Updated by CSV import at 20260617230210,200,sq ft,materials,yes,10,"import-update",,,,pending
+,General,CSV Import Test 20260617230210,New row inserted from CSV import,12345,job,service,no,999,"import-insert",,,,pending

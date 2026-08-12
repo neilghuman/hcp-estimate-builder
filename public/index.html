@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ScopeFoundry — United Services Northwest</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark')
+          ? mode
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>ScopeFoundry</h1>
+        <p class="sub">by United Services Northwest &mdash; Upload a spreadsheet of multi-option estimates and push them to Housecall Pro.</p>
+      </div>
+      <div class="toolbar">
+        <a href="/intake.html" class="btn-toolbar">📝 Intake</a>
+        <a href="/estimator-lab.html" class="btn-toolbar">🧪 UI Lab</a>
+        <a href="/estimator-studio.html" class="btn-toolbar">🎨 Studio</a>
+        <a href="/pricebook.html" class="btn-toolbar">📋 Pricebook</a>
+        <a href="/chatfoundry.html" class="btn-toolbar">💬 Chat Foundry</a>
+        <a id="btnQuickTicket" href="#" class="btn-toolbar" title="Open Quick Ticket">🎫 Quick Ticket</a>
+        <a href="/api/template/download" class="btn-toolbar" download>⬇ Download Template</a>
+        <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Step 1: customer -->
+    <section class="card" id="step-customer">
+      <h2><span class="num">1</span> Find the customer</h2>
+      <input type="text" id="custSearch" placeholder="Search name, email, or phone…" autocomplete="off" />
+      <ul id="custResults" class="results"></ul>
+      <div id="custChosen" class="chosen"></div>
+      <div class="customer-actions">
+        <button type="button" class="secondary ghost hidden" id="btnClearCustomer">Clear Customer &amp; Reset Workflow</button>
+      </div>
+      <div id="addrChoice"></div>
+      <p class="hint">If available, choose both service and billing addresses. Service is used for estimate location.</p>
+    </section>
+
+    <!-- Step 2: source -->
+    <section class="card disabled" id="step-source">
+      <h2><span class="num">2</span> Choose estimate source</h2>
+      <p class="hint source-intro">Pick one way to start this estimate. Upload from SiteRecon or a completed spreadsheet, or start in-app with a blank estimate or a ready-made service template. You can only use one source per session.</p>
+      <div class="source-grid" id="sourceGrid">
+        <button type="button" class="source-card" data-source="siterecon" id="sourceSiterecon">
+          <span class="source-kicker">Start From</span>
+          <span class="source-title">SiteRecon</span>
+          <span class="source-body">Upload a SiteRecon workbook to generate a starter estimate from measured property data.</span>
+          <span class="source-hint">Best when you want ScopeFoundry to help build the estimate from site measurements.</span>
+        </button>
+        <button type="button" class="source-card" data-source="template" id="sourceTemplate">
+          <span class="source-kicker">Upload Full</span>
+          <span class="source-title">Estimate Spreadsheet</span>
+          <span class="source-body">Upload a completed estimate spreadsheet using the ScopeFoundry template format.</span>
+          <span class="source-hint">Best when you already know the full scope and want to import it directly.</span>
+        </button>
+        <button type="button" class="source-card" data-source="blank" id="sourceBlank">
+          <span class="source-kicker">Start In-App</span>
+          <span class="source-title">Blank Estimate</span>
+          <span class="source-body">Begin with an empty Good / Better / Best estimate and build it line by line.</span>
+          <span class="source-hint">Best when you want full control and no template to start from.</span>
+        </button>
+        <button type="button" class="source-card" data-source="lawncare" id="sourceLawncare">
+          <span class="source-kicker">Starter Template</span>
+          <span class="source-title">Lawn Care</span>
+          <span class="source-body">Pre-filled mowing, edging, fertilization, and turf care across three tiers.</span>
+          <span class="source-hint">Best for recurring lawn maintenance quotes you can tweak fast.</span>
+        </button>
+        <button type="button" class="source-card" data-source="pressurewash" id="sourcePressurewash">
+          <span class="source-kicker">Starter Template</span>
+          <span class="source-title">Pressure Washing</span>
+          <span class="source-body">Pre-filled house wash, driveway, patio, roof, and gutter cleaning tiers.</span>
+          <span class="source-hint">Best for exterior cleaning quotes you can adjust per property.</span>
+        </button>
+        <button type="button" class="source-card" data-source="windowcleaning" id="sourceWindowcleaning">
+          <span class="source-kicker">Starter Template</span>
+          <span class="source-title">Window Cleaning</span>
+          <span class="source-body">Pre-filled exterior, interior, screens, tracks, and skylight tiers.</span>
+          <span class="source-hint">Best for window cleaning quotes you can adjust per home.</span>
+        </button>
+        <button type="button" class="source-card" data-source="quickquote" id="sourceQuickquote">
+          <span class="source-kicker">Start In-App</span>
+          <span class="source-title">Quick Quote</span>
+          <span class="source-body">A single line item in one option. Perfect for straightforward, fast quotes.</span>
+          <span class="source-hint">Best when you just need one service priced quickly.</span>
+        </button>
+        <button type="button" class="source-card" data-source="duplicate" id="sourceDuplicate">
+          <span class="source-kicker">Clone Existing</span>
+          <span class="source-title">Duplicate Last Estimate</span>
+          <span class="source-body">Pick one of this customer's recent estimates and clone it as your starting point.</span>
+          <span class="source-hint">Best when this customer has a similar estimate you want to reuse and update.</span>
+        </button>
+      </div>
+      <div id="sourceMsg" class="msg"></div>
+    </section>
+
+    <!-- Step 3: file -->
+    <section class="card disabled" id="step-file">
+      <h2><span class="num">3</span> <span id="uploadStepTitle">Upload your selected file</span></h2>
+      <p id="uploadStepHint" class="hint">Choose an estimate source first.</p>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv" />
+      <div id="duplicateEstimateSelector" class="hidden">
+        <p class="hint">Select an estimate to duplicate:</p>
+        <select id="estimateSelect">
+          <option value="">Loading your recent estimates…</option>
+        </select>
+      </div>
+      <div id="parseMsg" class="msg"></div>
+      <div id="serviceSearchBox" class="hidden" style="margin-bottom: 20px;">
+        <input type="text" id="serviceSearch" placeholder="Search pricebook (e.g., 'weekly mowing', 'cleanup')…" style="width: 100%; max-width: 500px; padding: 8px 12px;" />
+        <div id="serviceSearchResults" class="service-search-results hidden"></div>
+      </div>
+      <div id="preview"></div>
+    </section>
+
+    <!-- Step 4: confirm -->
+    <section class="card disabled" id="step-confirm">
+      <h2><span class="num">4</span> Review &amp; create</h2>
+      <div id="summary"></div>
+      <label class="test-mode">
+        <input type="checkbox" id="testMode" />
+        Mark output names as [TEST]
+      </label>
+      <div class="actions">
+        <button id="btnDry" class="secondary">Dry run (preview API calls)</button>
+        <button id="btnCreate" class="primary">Create in Housecall Pro</button>
+      </div>
+      <div id="result" class="msg"></div>
+    </section>
+  </main>
+
+  <!-- Quick Ticket modal: loads the app (port 8125 on this host) in-place so
+       in-progress estimate work on this page is never lost. -->
+  <div id="qtModal" class="qt-modal" hidden>
+    <div class="qt-modal__backdrop" data-qt-close></div>
+    <div class="qt-modal__panel" role="dialog" aria-modal="true" aria-label="Quick Ticket">
+      <div class="qt-modal__bar">
+        <span class="qt-modal__title">🎫 Quick Ticket</span>
+        <div class="qt-modal__actions">
+          <a id="qtOpenTab" class="btn-toolbar" target="_blank" rel="noopener" title="Open in a new tab">↗ Open in tab</a>
+          <button type="button" id="qtClose" class="btn-toolbar" data-qt-close title="Close">✕ Close</button>
+        </div>
+      </div>
+      <iframe id="qtFrame" class="qt-modal__frame" title="Quick Ticket" referrerpolicy="no-referrer"></iframe>
+    </div>
+  </div>
+
+  <script>
+    // Quick Ticket runs as a separate app on port 8125 of the same host.
+    (function () {
+      // Behind the internal reverse proxy the friendly hostnames have no :8125,
+      // so Quick Ticket is reached via its own proxied host. On direct IP /
+      // localhost access it is still :8125 on the same host.
+      function quickTicketBase() {
+        var h = location.hostname;
+        if (/(^|\.)scopefoundry\.test$/i.test(h)) {
+          return location.protocol + '//quickticket.scopefoundry.test';
+        }
+        return location.protocol + '//' + h + ':8125';
+      }
+      var base = quickTicketBase();
+      var modal = document.getElementById('qtModal');
+      var frame = document.getElementById('qtFrame');
+      var openBtn = document.getElementById('btnQuickTicket');
+      var tabLink = document.getElementById('qtOpenTab');
+      if (!modal || !frame) return;
+      if (tabLink) tabLink.href = base;
+      function open(e) {
+        if (e) e.preventDefault();
+        if (!frame.src) frame.src = base;   // lazy-load once; keeps form state across opens
+        modal.hidden = false;
+        document.body.style.overflow = 'hidden';
+      }
+      function close() {
+        modal.hidden = true;
+        document.body.style.overflow = '';
+      }
+      if (openBtn) openBtn.addEventListener('click', open);
+      modal.addEventListener('click', function (e) {
+        if (e.target && e.target.hasAttribute('data-qt-close')) close();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.hidden) close();
+      });
+    })();
+  </script>
+  <script src="/theme.js?v=2"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

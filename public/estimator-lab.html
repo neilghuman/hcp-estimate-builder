@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ScopeFoundry Lab — United Services Northwest</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark')
+          ? mode
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/estimator-lab.css" />
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>ScopeFoundry Lab</h1>
+        <p class="sub">UI sandbox for estimate flow redesign. Backend behavior and import APIs stay unchanged.</p>
+      </div>
+      <div class="toolbar">
+        <a href="/" class="btn-toolbar">← Back to Current App</a>
+        <a href="/intake.html" class="btn-toolbar">📝 Intake</a>
+        <a href="/estimator-studio.html" class="btn-toolbar">🎨 Studio</a>
+        <a href="/pricebook.html" class="btn-toolbar">📋 Pricebook</a>
+        <a href="/api/template/download" class="btn-toolbar" download>⬇ Download Template</a>
+        <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Step 1: customer -->
+    <section class="card" id="step-customer">
+      <h2><span class="num">1</span> Find the customer</h2>
+      <input type="text" id="custSearch" placeholder="Search name, email, or phone…" autocomplete="off" />
+      <ul id="custResults" class="results"></ul>
+      <div id="custChosen" class="chosen"></div>
+      <div class="customer-actions">
+        <button type="button" class="secondary ghost hidden" id="btnClearCustomer">Clear Customer &amp; Reset Workflow</button>
+      </div>
+      <div id="addrChoice"></div>
+      <p class="hint">If available, choose both service and billing addresses. Service is used for estimate location.</p>
+    </section>
+
+    <!-- Step 2: source -->
+    <section class="card disabled" id="step-source">
+      <h2><span class="num">2</span> Choose estimate source</h2>
+      <p class="hint source-intro">Pick one way to start this estimate. Upload from SiteRecon or a completed spreadsheet, or start in-app with a blank estimate or a ready-made service template. You can only use one source per session.</p>
+      <div class="source-grid" id="sourceGrid">
+        <button type="button" class="source-card" data-source="siterecon" id="sourceSiterecon">
+          <span class="source-kicker">Start From</span>
+          <span class="source-title">SiteRecon</span>
+          <span class="source-body">Upload a SiteRecon workbook to generate a starter estimate from measured property data.</span>
+          <span class="source-hint">Best when you want ScopeFoundry to help build the estimate from site measurements.</span>
+        </button>
+        <button type="button" class="source-card" data-source="template" id="sourceTemplate">
+          <span class="source-kicker">Upload Full</span>
+          <span class="source-title">Estimate Spreadsheet</span>
+          <span class="source-body">Upload a completed estimate spreadsheet using the ScopeFoundry template format.</span>
+          <span class="source-hint">Best when you already know the full scope and want to import it directly.</span>
+        </button>
+        <button type="button" class="source-card" data-source="blank" id="sourceBlank">
+          <span class="source-kicker">Start In-App</span>
+          <span class="source-title">Blank Estimate</span>
+          <span class="source-body">Begin with an empty Good / Better / Best estimate and build it line by line.</span>
+          <span class="source-hint">Best when you want full control and no template to start from.</span>
+        </button>
+        <button type="button" class="source-card" data-source="lawncare" id="sourceLawncare">
+          <span class="source-kicker">Starter Template</span>
+          <span class="source-title">Lawn Care</span>
+          <span class="source-body">Pre-filled mowing, edging, fertilization, and turf care across three tiers.</span>
+          <span class="source-hint">Best for recurring lawn maintenance quotes you can tweak fast.</span>
+        </button>
+        <button type="button" class="source-card" data-source="pressurewash" id="sourcePressurewash">
+          <span class="source-kicker">Starter Template</span>
+          <span class="source-title">Pressure Washing</span>
+          <span class="source-body">Pre-filled house wash, driveway, patio, roof, and gutter cleaning tiers.</span>
+          <span class="source-hint">Best for exterior cleaning quotes you can adjust per property.</span>
+        </button>
+        <button type="button" class="source-card" data-source="windowcleaning" id="sourceWindowcleaning">
+          <span class="source-kicker">Starter Template</span>
+          <span class="source-title">Window Cleaning</span>
+          <span class="source-body">Pre-filled exterior, interior, screens, tracks, and skylight tiers.</span>
+          <span class="source-hint">Best for window cleaning quotes you can adjust per home.</span>
+        </button>
+        <button type="button" class="source-card" data-source="quickquote" id="sourceQuickquote">
+          <span class="source-kicker">Start In-App</span>
+          <span class="source-title">Quick Quote</span>
+          <span class="source-body">A single line item in one option. Perfect for straightforward, fast quotes.</span>
+          <span class="source-hint">Best when you just need one service priced quickly.</span>
+        </button>
+        <button type="button" class="source-card" data-source="duplicate" id="sourceDuplicate">
+          <span class="source-kicker">Clone Existing</span>
+          <span class="source-title">Duplicate Last Estimate</span>
+          <span class="source-body">Pick one of this customer's recent estimates and clone it as your starting point.</span>
+          <span class="source-hint">Best when this customer has a similar estimate you want to reuse and update.</span>
+        </button>
+      </div>
+      <div id="sourceMsg" class="msg"></div>
+    </section>
+
+    <!-- Step 3: file -->
+    <section class="card disabled" id="step-file">
+      <h2><span class="num">3</span> <span id="uploadStepTitle">Upload your selected file</span></h2>
+      <p id="uploadStepHint" class="hint">Choose an estimate source first.</p>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv" />
+      <div id="duplicateEstimateSelector" class="hidden">
+        <p class="hint">Select an estimate to duplicate:</p>
+        <select id="estimateSelect">
+          <option value="">Loading your recent estimates…</option>
+        </select>
+      </div>
+      <div id="parseMsg" class="msg"></div>
+      <div id="serviceSearchBox" class="hidden" style="margin-bottom: 20px;">
+        <input type="text" id="serviceSearch" placeholder="Search pricebook (e.g., 'weekly mowing', 'cleanup')…" style="width: 100%; max-width: 500px; padding: 8px 12px;" />
+        <div id="serviceSearchResults" class="service-search-results hidden"></div>
+      </div>
+      <div id="preview"></div>
+    </section>
+
+    <!-- Step 4: confirm -->
+    <section class="card disabled" id="step-confirm">
+      <h2><span class="num">4</span> Review &amp; create</h2>
+      <div id="summary"></div>
+      <label class="test-mode">
+        <input type="checkbox" id="testMode" />
+        Mark output names as [TEST]
+      </label>
+      <div class="actions">
+        <button id="btnDry" class="secondary">Dry run (preview API calls)</button>
+        <button id="btnCreate" class="primary">Create in Housecall Pro</button>
+      </div>
+      <div id="result" class="msg"></div>
+    </section>
+  </main>
+
+  <script src="/theme.js?v=2"></script>
+  <script src="/estimator-lab.js"></script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  postgres:
+    # pgvector image (NOT plain postgres:16-alpine) — the live DB on 10.0.10.102
+    # was migrated to pgvector for the Duplicate Finder; recreating it as alpine
+    # would drop the vector extension. Keep this pinned.
+    image: pgvector/pgvector:pg16
+    container_name: scopefoundry-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scopefoundry
+      POSTGRES_USER: scopeuser
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-scopepass_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/001_create_pricebook.sql:/docker-entrypoint-initdb.d/001_create_pricebook.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scopeuser -d scopefoundry"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - estimate-network
+
+  estimate-builder:
+    build: .
+    container_name: hcp-estimate-builder
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the container, listen on all interfaces; the host port mapping
+      # below is what controls exposure. Keep the published port bound to the
+      # host's LAN IP only and firewall it from the internet.
+      - HOST=0.0.0.0
+    ports:
+      # Publish only on the box's LAN IP (10.0.10.102), not 0.0.0.0, so it is
+      # never reachable from the public internet. Change the IP if needed.
+      - "10.0.10.102:8123:8123"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - estimate-network
+
+volumes:
+  postgres_data:
+
+networks:
+  estimate-network:
+    driver: bridge

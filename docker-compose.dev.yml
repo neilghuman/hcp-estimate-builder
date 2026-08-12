@@ -1,0 +1,30 @@
+# DEV-only GUI container for 192.168.1.8 (always-on, restart on reboot).
+# DB + AI service + Ollama already run as containers on the n8n_default network,
+# so this joins that network and reaches them by name (overriding the host-oriented
+# values in .env, which are used when running `npm run dev` natively instead).
+#
+#   docker compose -f docker-compose.dev.yml up -d --build
+#
+services:
+  hcp-estimate-builder-dev:
+    build: .
+    image: hcp-estimate-builder-dev:latest
+    container_name: hcp-estimate-builder-dev
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8123"
+      # Container-network targets (override the host 127.0.0.1/LAN values in .env)
+      DB_HOST: scopefoundry-db-dev
+      DB_PORT: "5432"
+      OLLAMA_API_BASE: http://ollama:11434
+      SCOPEFOUNDRY_AI_BASE: http://scopefoundry-ai:8200
+    ports:
+      - "192.168.1.8:8123:8123"
+    networks:
+      - n8n_default
+
+networks:
+  n8n_default:
+    external: true

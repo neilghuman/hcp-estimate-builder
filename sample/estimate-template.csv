@@ -1,0 +1,10 @@
+option,option_message,line_name,description,unit_of_measure,quantity,frequency,unit_price,pricing_mode,flat_amount,kind,taxable
+Good,Essential service,Remove 40ft fir (rear yard),Fell and section,job,1,single,1500.00,calculated,0,labor,yes
+Good,,Haul and dispose debris,,job,1,single,200.00,calculated,0,labor,yes
+Better,Recommended,Remove 40ft fir + stump grind,Includes Good scope,job,1,single,1800.00,calculated,0,labor,yes
+Better,,Stump grinding,Grind below grade,job,1,single,350.00,calculated,0,labor,yes
+Better,,Haul and dispose debris,,job,1,single,200.00,calculated,0,labor,yes
+Best,Full property cleanup,Remove all 3 trees,Front and rear,job,1,single,3200.00,calculated,0,labor,yes
+Best,,Stump grinding x3,,each,3,single,300.00,calculated,0,labor,yes
+Best,,Haul and dispose debris,,job,1,single,400.00,calculated,0,labor,yes
+Best,,Seasonal property maintenance,Recurring upkeep (flat rate),visit,1,monthly,0,flat,450.00,labor,yes

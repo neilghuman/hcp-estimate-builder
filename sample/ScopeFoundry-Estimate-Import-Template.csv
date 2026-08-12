@@ -1,0 +1,8 @@
+option,option_message,line_name,description,unit_of_measure,quantity,frequency,unit_price,pricing_mode,flat_amount,kind,taxable
+Good,Budget-friendly essentials,Lawn Mowing,Weekly mowing service,visit,1,weekly,120,calculated,0,labor,yes
+Good,Budget-friendly essentials,Edge Trimming,Perimeter edge cleanup,ft,1,single,0.45,calculated,0,labor,yes
+Better,Enhanced curb appeal package,Lawn Mowing,Weekly mowing service,visit,1,weekly,120,calculated,0,labor,yes
+Better,Enhanced curb appeal package,Bed Mulch Refresh,Install fresh mulch in beds,sq ft,320,single,1.85,calculated,0,materials,yes
+Best,Premium full-property care,Lawn Mowing,Weekly mowing service,visit,1,weekly,120,calculated,0,labor,yes
+Best,Premium full-property care,Hedge Trimming,Shape and trim all hedges,ft,180,single,2.75,calculated,0,labor,yes
+Best,Premium full-property care,Seasonal Cleanup,Debris removal and haul-away,job,1,monthly,0,flat,240,service,no

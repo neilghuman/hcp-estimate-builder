@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.production
+.env.bak*
+*.log
+uploads/
+.DS_Store
+_image_review/
+backups/

@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ScopeFoundry Studio — United Services Northwest</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark')
+          ? mode
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/estimator-studio.css?v=33" />
+</head>
+<body>
+  <!-- Global sticky header -->
+  <header class="studio-header">
+    <div class="studio-header-left">
+      <div class="studio-brand">
+        <a href="/" class="studio-brandmark" title="ScopeFoundry home">
+          <span class="studio-logo">◈</span>
+          <span class="studio-wordmark">
+            <strong>ScopeFoundry</strong>
+            <small>by United Services Northwest</small>
+          </span>
+        </a>
+        <span class="studio-brand-divider" aria-hidden="true"></span>
+        <div class="studio-estimate-name">
+          <input type="text" id="estimateName" value="Lawn Care Starter" aria-label="Estimate name" />
+          <span class="studio-estimate-kicker">ScopeFoundry Studio</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="studio-header-right">
+      <span class="studio-status" id="importStatus" title="Import status">CSV Imported ✓</span>
+      <span class="studio-status" id="exportStatus" title="Export status">HCP: attach customer</span>
+      <a href="/" class="studio-btn ghost" title="Back to current app">← App</a>
+      <a href="/estimator-lab.html" class="studio-btn ghost">🧪 Lab</a>
+      <button id="btnTheme" class="studio-btn ghost" title="Toggle theme">🌙</button>
+    </div>
+  </header>
+
+  <!-- Setup: Customer · Property · Estimate Settings -->
+  <div class="studio-setup">
+    <!-- Section 1: Customer -->
+    <section class="setup-card" id="customerCard" aria-label="Customer">
+      <div class="setup-card-head">
+        <span class="setup-num">1</span>
+        <h2>Customer</h2>
+        <button id="custChange" class="setup-card-action hidden">Change</button>
+      </div>
+      <div class="setup-card-body">
+        <div class="studio-customer" id="customerBox">
+          <input type="text" id="custSearch" placeholder="Search name, email, or phone…" autocomplete="off" />
+          <ul id="custResults" class="studio-results hidden"></ul>
+        </div>
+        <div class="customer-chip hidden" id="customerChip">
+          <div class="customer-chip-avatar" id="custAvatar">·</div>
+          <div class="customer-chip-info">
+            <span class="customer-chip-name" id="custName"></span>
+            <span class="customer-chip-meta" id="custMeta"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 2: Property -->
+    <section class="setup-card" id="propertyCard" aria-label="Property">
+      <div class="setup-card-head">
+        <span class="setup-num">2</span>
+        <h2>Property</h2>
+        <button id="propertyChange" class="setup-card-action hidden">Change</button>
+      </div>
+      <div class="setup-card-body">
+        <div class="property-empty" id="propertyEmpty">Select a customer to choose a service &amp; billing address.</div>
+        <div class="property-summary hidden" id="propertySummary">
+          <div class="property-addr">
+            <span class="property-addr-label">Service</span>
+            <span class="property-addr-line" id="propServiceLine"></span>
+          </div>
+          <div class="property-addr">
+            <span class="property-addr-label">Billing</span>
+            <span class="property-addr-line" id="propBillingLine"></span>
+          </div>
+        </div>
+        <div class="studio-address-notice hidden" id="addressNotice" role="alert">
+          ⚠ No address on file — add one in Housecall Pro first, then re-select the customer.
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3: Estimate Settings -->
+    <section class="setup-card" id="settingsCard" aria-label="Estimate settings">
+      <div class="setup-card-head">
+        <span class="setup-num">3</span>
+        <h2>Estimate Settings</h2>
+      </div>
+      <div class="setup-card-body settings-grid">
+        <label class="settings-field">
+          <span class="settings-label">Division</span>
+          <select id="divisionSelect" class="studio-select" title="Business division"></select>
+        </label>
+        <label class="settings-field">
+          <span class="settings-label">Template</span>
+          <div class="studio-tpl-dd" id="templateDropdown">
+            <button type="button" class="studio-select studio-tpl-trigger" id="templateTrigger" aria-haspopup="true" aria-expanded="false">
+              <span class="studio-tpl-trigger-label" id="templateTriggerLabel">Ad-hoc estimate (no template)</span>
+              <span class="studio-tpl-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="studio-tpl-menu hidden" id="templateMenu" role="menu"></div>
+          </div>
+        </label>
+        <div class="settings-actions">
+          <button id="btnMeasure" class="studio-btn">📐 Measurements</button>
+          <button id="btnSaveTemplate" class="studio-btn">💾 Save as template</button>
+          <button id="btnDry" class="studio-btn">⚙ Dry run</button>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div id="resultMsg" class="studio-result-msg"></div>
+  <div id="preflightPanel" class="studio-preflight hidden"></div>
+
+  <!-- Navigation tabs + action hierarchy -->
+  <div class="studio-tabbar">
+    <nav class="studio-tabs" role="tablist" aria-label="Estimate views">
+      <button class="studio-tab active" data-view="build" role="tab">🧱 Build</button>
+      <button class="studio-tab" data-view="compare" role="tab">📊 Compare</button>
+      <button class="studio-tab" data-view="preview" role="tab">👁 Preview</button>
+      <button id="copyBadge" class="studio-rollup hidden" title="Jump to the first service missing customer-facing copy"></button>
+    </nav>
+    <div class="studio-tabbar-actions">
+      <button id="btnDrafts" class="studio-btn">📁 Drafts</button>
+      <button id="btnSaveDraft" class="studio-btn">💾 Save Draft</button>
+      <button id="btnPreview" class="studio-btn">👁 Preview Estimate</button>
+      <span id="hcpLinkBadge" class="studio-hcp-badge hidden"></span>
+      <button id="btnCreate" class="studio-btn primary">Create in Housecall Pro →</button>
+    </div>
+  </div>
+
+  <!-- Package totals strip -->
+  <div class="studio-totalbar" id="totalBar">
+    <div class="studio-header-totals" id="headerTotals" aria-live="polite">
+      <!-- package value chips injected here -->
+    </div>
+  </div>
+
+  <!-- Quick-start (shown when no packages) -->
+  <div class="studio-quickstart" id="quickStart">
+    <div class="studio-featured hidden" id="featuredTemplates"></div>
+    <h2>Choose estimate source</h2>
+    <p>Pick one way to start this estimate. Upload from SiteRecon or a completed spreadsheet, or start in-app with a blank estimate, a ready-made template, a quick quote, or by cloning a recent estimate.</p>
+    <div class="studio-source-grid">
+      <button class="studio-source-card" data-import="siterecon" id="srcSiterecon">
+        <span class="source-kicker">Start From</span>
+        <span class="source-title">SiteRecon</span>
+        <span class="source-body">Upload a SiteRecon workbook to generate a starter estimate from measured property data.</span>
+        <span class="source-hint">Best when you want ScopeFoundry to build from site measurements.</span>
+      </button>
+      <button class="studio-source-card" data-import="spreadsheet" id="srcSpreadsheet">
+        <span class="source-kicker">Upload Full</span>
+        <span class="source-title">Estimate Spreadsheet</span>
+        <span class="source-body">Upload a completed estimate spreadsheet using the ScopeFoundry template format.</span>
+        <span class="source-hint">Best when you already know the full scope and want to import it directly.</span>
+      </button>
+      <button class="studio-source-card" data-starter="blank" id="srcBlank">
+        <span class="source-kicker">Start In-App</span>
+        <span class="source-title">Blank Estimate</span>
+        <span class="source-body">Begin with a single package and build it line by line. Add more packages and switch to Good / Better / Best anytime.</span>
+        <span class="source-hint">Best when you want full control and no template to start from.</span>
+      </button>
+      <button class="studio-source-card" data-starter="lawncare" id="srcLawncare">
+        <span class="source-kicker">Starter Template</span>
+        <span class="source-title">Lawn Care</span>
+        <span class="source-body">Pre-filled mowing, edging, fertilization, and turf care across three tiers.</span>
+        <span class="source-hint">Best for recurring lawn maintenance quotes you can tweak fast.</span>
+      </button>
+      <button class="studio-source-card" data-starter="pressurewash" id="srcPressurewash">
+        <span class="source-kicker">Starter Template</span>
+        <span class="source-title">Pressure Washing</span>
+        <span class="source-body">Pre-filled house wash, driveway, patio, roof, and gutter cleaning tiers.</span>
+        <span class="source-hint">Best for exterior cleaning quotes you can adjust per property.</span>
+      </button>
+      <button class="studio-source-card" data-starter="windowcleaning" id="srcWindowcleaning">
+        <span class="source-kicker">Starter Template</span>
+        <span class="source-title">Window Cleaning</span>
+        <span class="source-body">Pre-filled exterior, interior, screens, tracks, and skylight tiers.</span>
+        <span class="source-hint">Best for window cleaning quotes you can adjust per home.</span>
+      </button>
+      <button class="studio-source-card" data-starter="quickquote" id="srcQuickquote">
+        <span class="source-kicker">Start In-App</span>
+        <span class="source-title">Quick Quote</span>
+        <span class="source-body">A single line item in one option. Perfect for straightforward, fast quotes.</span>
+        <span class="source-hint">Best when you just need one service priced quickly.</span>
+      </button>
+      <button class="studio-source-card" data-import="duplicate" id="srcDuplicate">
+        <span class="source-kicker">Clone Existing</span>
+        <span class="source-title">Duplicate Last Estimate</span>
+        <span class="source-body">Pick one of this customer's recent estimates and clone it as your starting point.</span>
+        <span class="source-hint">Best when this customer has a similar estimate you want to reuse and update.</span>
+      </button>
+    </div>
+  </div>
+
+
+  <!-- Three-pane workspace -->
+  <main class="studio-workspace hidden" id="workspace">
+    <!-- LEFT: Packages -->
+    <section class="pane pane-packages" aria-label="Packages">
+      <div class="pane-head">
+        <h3>Packages</h3>
+        <div class="pane-head-tools">
+          <select id="namingScheme" class="naming-select" title="Package naming">
+            <option value="gbb">Good / Better / Best</option>
+            <option value="option">Option #1, #2, #3</option>
+          </select>
+          <button class="icon-btn" id="addPackage" title="Create package">＋</button>
+        </div>
+      </div>
+      <div class="pane-body" id="packageList"></div>
+    </section>
+
+    <!-- CENTER: Services -->
+    <section class="pane pane-services" aria-label="Services">
+      <div class="pane-head">
+        <h3 id="servicesTitle">Services</h3>
+        <div class="pane-head-actions">
+          <button class="icon-btn" id="btnBulkFill" title="Fill blanks with AI for every service in this package">✨</button>
+          <button class="icon-btn" id="btnBulkRewrite" title="Rewrite with AI for every service in this package">♻️</button>
+          <button class="icon-btn" id="btnLibrary" title="Add from service library">📚</button>
+          <button class="icon-btn" id="addService" title="Add service">＋</button>
+        </div>
+      </div>
+      <div class="pane-subhead">
+        <input type="text" id="serviceFilter" class="studio-input" placeholder="Search services in this package…" />
+      </div>
+      <div class="pane-body" id="serviceList"></div>
+      <div class="pane-foot" id="serviceListFoot"></div>
+    </section>
+
+    <!-- RIGHT: Service editor -->
+    <section class="pane pane-editor" aria-label="Service editor">
+      <div class="pane-head">
+        <h3 id="editorTitle">Service Editor</h3>
+        <span class="autosave-pill" id="autosavePill">Auto-saves</span>
+      </div>
+      <div class="editor-name-bar hidden" id="editorNameBar">
+        <label for="editorNameInput">Service Name</label>
+        <input id="editorNameInput" class="studio-input" type="text" placeholder="Name this service…" autocomplete="off" />
+      </div>
+      <div class="editor-tabs" id="editorTabs" role="tablist">
+        <button class="editor-tab active" data-tab="pricing" role="tab">Pricing</button>
+        <button class="editor-tab" data-tab="general" role="tab">Description</button>
+        <button class="editor-tab" data-tab="notes" role="tab">Notes</button>
+        <button class="editor-tab" data-tab="metadata" role="tab">Metadata</button>
+      </div>
+      <div class="pane-body" id="editorBody">
+        <div class="editor-empty">Select a service to edit its details.</div>
+      </div>
+      <div class="ai-status hidden" id="aiStatus" aria-live="polite"></div>
+      <div class="pane-foot editor-foot" id="editorFoot">
+        <button class="studio-btn studio-btn-ai" id="btnGenerateAi" title="Fill only the fields that are currently empty (never overwrites your text)" disabled>✨ Fill blanks with AI</button>
+        <button class="studio-btn studio-btn-ai" id="btnRewriteAi" title="Rewrite only the fields that already have text (regenerates existing content)" disabled>♻️ Rewrite with AI</button>
+        <button class="studio-btn" id="btnSaveToPricebook" disabled>📕 Save to price book</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Compare / diff view -->
+  <section class="studio-compare hidden" id="compareView" aria-label="Package comparison"></section>
+
+  <!-- Customer preview view -->
+  <section class="studio-preview hidden" id="previewView" aria-label="Customer preview"></section>
+
+  <!-- Service picker drawer -->
+  <div class="studio-drawer-backdrop hidden" id="pickerBackdrop"></div>
+  <aside class="studio-drawer hidden" id="servicePicker" aria-label="Add service">
+    <div class="drawer-head">
+      <h3>Add service</h3>
+      <button class="icon-btn" id="pickerClose" title="Close">✕</button>
+    </div>
+    <p class="hint">📕 Results come live from your price book.</p>
+    <input type="text" id="pickerSearch" class="studio-input" placeholder="Search your price book…" autocomplete="off" />
+    <div class="drawer-body" id="pickerResults">
+      <div class="hint">Type at least 2 characters to search, or add a blank custom service.</div>
+    </div>
+    <div class="drawer-foot">
+      <button class="studio-btn" id="pickerAddBlank">＋ Add blank custom service</button>
+    </div>
+  </aside>
+
+  <!-- Service library drawer -->
+  <aside class="studio-drawer hidden" id="libraryDrawer" aria-label="Service library">
+    <div class="drawer-head">
+      <h3>📚 Service Library</h3>
+      <button class="icon-btn" id="libClose" title="Close">✕</button>
+    </div>
+    <p class="hint">Reusable services. Adding one references the shared definition — edit it once and every package updates.</p>
+    <input type="text" id="libSearch" class="studio-input" placeholder="Search your library…" autocomplete="off" />
+    <div class="drawer-body" id="libResults"></div>
+  </aside>
+
+  <!-- Saved drafts drawer -->
+  <aside class="studio-drawer hidden" id="draftsDrawer" aria-label="Saved drafts">
+    <div class="drawer-head">
+      <h3>📁 Saved Drafts</h3>
+      <button class="icon-btn" id="draftsClose" title="Close">✕</button>
+    </div>
+    <p class="hint">Drafts are saved on the server and numbered (#1, #2…) so you can reference them. Open one to keep working.</p>
+    <div class="drawer-foot drawer-foot-top">
+      <button class="studio-btn" id="draftsSaveNew">💾 Save current as new draft</button>
+    </div>
+    <div class="drawer-body" id="draftsResults"></div>
+  </aside>
+
+  <!-- Property measurements drawer -->
+  <aside class="studio-drawer hidden" id="measureDrawer" aria-label="Property measurements">
+    <div class="drawer-head">
+      <h3>📐 Property Measurements</h3>
+      <button class="icon-btn" id="measureClose" title="Close">✕</button>
+    </div>
+    <p class="hint">Stored on the estimate. Services priced “by measurement” recalculate automatically (Base + value × multiplier).</p>
+    <div class="drawer-body">
+      <div class="field"><label>Turf (sq ft)</label><input type="number" step="any" data-m="turf" /></div>
+      <div class="field"><label>Concrete (sq ft)</label><input type="number" step="any" data-m="concrete" /></div>
+      <div class="field"><label>Roof (sq ft)</label><input type="number" step="any" data-m="roof" /></div>
+      <div class="field"><label>Fence (linear ft)</label><input type="number" step="any" data-m="fence" /></div>
+      <div class="field"><label>Gutter (linear ft)</label><input type="number" step="any" data-m="gutter" /></div>
+    </div>
+  </aside>
+
+  <!-- Duplicate estimate drawer -->
+  <aside class="studio-drawer hidden" id="duplicateDrawer" aria-label="Duplicate estimate">
+    <div class="drawer-head">
+      <h3>⧉ Duplicate estimate</h3>
+      <button class="icon-btn" id="dupClose" title="Close">✕</button>
+    </div>
+    <p class="hint">Clone one of this customer's recent estimates as your starting point. Everything imports into the studio so you can edit it freely.</p>
+    <div class="drawer-body" id="dupResults"></div>
+  </aside>
+
+  <!-- Hidden file input used by SiteRecon / spreadsheet imports -->
+  <input type="file" id="importFile" class="hidden" />
+
+  <!-- Property / address modal (select service + billing address) -->
+  <div class="studio-modal-backdrop hidden" id="propertyModalBackdrop"></div>
+  <div class="studio-modal hidden" id="propertyModal" role="dialog" aria-modal="true" aria-label="Choose property addresses">
+    <div class="modal-head">
+      <h3>Property &amp; Addresses</h3>
+      <button class="icon-btn" id="propertyModalClose" title="Close">✕</button>
+    </div>
+    <div class="modal-body" id="propertyModalBody"></div>
+    <div class="modal-foot">
+      <span class="modal-hint">Need a new address? Add it in Housecall Pro, then re-select the customer.</span>
+      <div class="modal-foot-actions">
+        <button class="studio-btn" id="propertyModalCancel">Cancel</button>
+        <button class="studio-btn primary" id="propertyModalSave">Use this property</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save to price book modal -->
+  <div class="studio-modal-backdrop hidden" id="pbModalBackdrop"></div>
+  <div class="studio-modal hidden" id="pbModal" role="dialog" aria-modal="true" aria-labelledby="pbModalTitle">
+    <div class="modal-head">
+      <h3 id="pbModalTitle">Save to price book</h3>
+      <button class="icon-btn" id="pbModalClose" title="Close">✕</button>
+    </div>
+    <div class="modal-body" id="pbModalBody"></div>
+    <div class="modal-foot">
+      <span class="modal-hint" id="pbModalHint">Writes to your Postgres price book.</span>
+      <div class="modal-foot-actions" id="pbModalActions"></div>
+    </div>
+  </div>
+
+  <div id="studioToast" class="studio-toast hidden" role="status" aria-live="polite"></div>
+
+  <!-- Housecall Pro push preview modal (review/edit exactly what will be created) -->
+  <div class="studio-modal-backdrop hidden" id="hcpModalBackdrop"></div>
+  <div class="studio-modal hcp-modal hidden" id="hcpModal" role="dialog" aria-modal="true" aria-labelledby="hcpModalTitle">
+    <div class="modal-head">
+      <h3 id="hcpModalTitle">Review what will be created in Housecall Pro</h3>
+      <button class="icon-btn" id="hcpModalClose" title="Close">✕</button>
+    </div>
+    <div class="modal-body" id="hcpModalBody"></div>
+    <div class="modal-foot">
+      <span class="modal-hint" id="hcpModalHint">Edit here before pushing — Housecall Pro can't update an estimate after it's created.</span>
+      <div class="modal-foot-actions">
+        <button class="studio-btn" id="hcpModalCancel">Cancel</button>
+        <button class="studio-btn" id="hcpModalSaveDraft">💾 Save as Draft</button>
+        <button class="studio-btn primary" id="hcpModalPush">Push to Housecall Pro →</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/theme.js?v=2"></script>
+  <script src="/estimator-studio.js?v=32"></script>
+</body>
+</html>

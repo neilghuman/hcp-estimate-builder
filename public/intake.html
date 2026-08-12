@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Customer Intake — ScopeFoundry</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark')
+          ? mode
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/intake.css" />
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>📝 Customer Intake</h1>
+        <p class="sub">by United Services Northwest &mdash; one consistent intake for every customer before it reaches an estimator.</p>
+      </div>
+      <div class="toolbar">
+        <a href="/index.html" class="btn-toolbar">🏠 Home</a>
+        <a href="/estimator-studio.html" class="btn-toolbar">🎨 Studio</a>
+        <a href="/pricebook.html" class="btn-toolbar">📋 Pricebook</a>
+        <a href="/chatfoundry.html" class="btn-toolbar">💬 Chat Foundry</a>
+        <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="intake-main">
+    <div id="msg" class="msg" hidden></div>
+
+    <!-- Sprint 1 note (removed in later sprints as steps are built out). -->
+    <section class="card intake-scaffold-note">
+      <p class="hint">
+        <strong>Sprint 1 — foundation.</strong> This scaffolds the intake shell and its durable draft
+        store. Customer lookup, validation, discovery questions, HCP customer/estimate creation, and
+        SMS notifications arrive in later sprints. Nothing is sent to Housecall Pro yet.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="intake-card-head">
+        <h2>Intake</h2>
+        <div class="intake-status">
+          <span id="draftBadge" class="badge" hidden></span>
+          <button id="btnNew" class="secondary">➕ Start new intake</button>
+        </div>
+      </div>
+
+      <fieldset id="intakeForm" class="intake-form" disabled>
+        <legend>Customer information</legend>
+        <div class="intake-grid">
+          <div class="intake-field">
+            <label for="first_name">First name <span class="req">*</span></label>
+            <input type="text" id="first_name" name="first_name" autocomplete="off" />
+            <small class="field-err" id="err_first_name" hidden></small>
+          </div>
+          <div class="intake-field">
+            <label for="last_name">Last name <span class="req">*</span></label>
+            <input type="text" id="last_name" name="last_name" autocomplete="off" />
+            <small class="field-err" id="err_last_name" hidden></small>
+          </div>
+          <div class="intake-field">
+            <label for="phone">Phone <span class="req">*</span></label>
+            <input type="tel" id="phone" name="phone" autocomplete="off" />
+            <small class="field-err" id="err_phone" hidden></small>
+          </div>
+          <div class="intake-field">
+            <label for="email">Email <span class="req">*</span></label>
+            <input type="email" id="email" name="email" autocomplete="off" />
+            <small class="field-err" id="err_email" hidden></small>
+          </div>
+          <div class="intake-field intake-span-2">
+            <label for="address_street">Street address <span class="req">*</span></label>
+            <input type="text" id="address_street" name="address_street" autocomplete="off" placeholder="Start typing to search…" />
+            <small class="field-err" id="err_address_street" hidden></small>
+            <input type="hidden" id="address_place_id" name="address_place_id" />
+          </div>
+          <div class="intake-field">
+            <label for="address_unit">Unit / Apt <span class="opt">(optional)</span></label>
+            <input type="text" id="address_unit" name="address_unit" autocomplete="off" />
+          </div>
+          <div class="intake-field">
+            <label for="address_city">City <span class="req">*</span></label>
+            <input type="text" id="address_city" name="address_city" autocomplete="off" />
+            <small class="field-err" id="err_address_city" hidden></small>
+          </div>
+          <div class="intake-field">
+            <label for="address_state">State <span class="req">*</span></label>
+            <input type="text" id="address_state" name="address_state" autocomplete="off" maxlength="2" />
+            <small class="field-err" id="err_address_state" hidden></small>
+          </div>
+          <div class="intake-field">
+            <label for="address_zip">ZIP code <span class="req">*</span></label>
+            <input type="text" id="address_zip" name="address_zip" autocomplete="off" inputmode="numeric" maxlength="5" />
+            <small class="field-err" id="err_address_zip" hidden></small>
+          </div>
+          <div class="intake-field">
+            <label for="company">Company <span class="opt">(optional)</span></label>
+            <input type="text" id="company" name="company" autocomplete="off" />
+          </div>
+          <div class="intake-field">
+            <label for="secondary_phone">Secondary phone <span class="opt">(optional)</span></label>
+            <input type="tel" id="secondary_phone" name="secondary_phone" autocomplete="off" />
+            <small class="field-err" id="err_secondary_phone" hidden></small>
+          </div>
+          <div class="intake-field intake-span-2">
+            <label for="address_notes">Address notes <span class="opt">(gate code, apartment, etc.)</span></label>
+            <input type="text" id="address_notes" name="address_notes" autocomplete="off" />
+          </div>
+        </div>
+
+        <div id="custStatus" class="intake-cust" aria-live="polite">
+          <div id="custLinked" class="intake-linked" hidden>
+            <span id="custLinkedText"></span>
+            <button type="button" id="btnUnlink" class="secondary">Not this customer — new</button>
+          </div>
+          <div id="custMatches" class="intake-matches"></div>
+        </div>
+
+        <div class="intake-actions">
+          <button id="btnSave" class="primary">💾 Save draft</button>
+          <span id="stepStatus" class="intake-step"></span>
+          <span id="savedAt" class="field-hint"></span>
+        </div>
+      </fieldset>
+    </section>
+
+    <section class="card">
+      <div class="intake-card-head">
+        <h2>Tag &amp; Housecall Pro</h2>
+        <span id="writeGate" class="badge"></span>
+      </div>
+      <fieldset id="hcpForm" class="intake-form" disabled>
+        <div class="intake-field">
+          <span class="intake-radio-legend">Customer tag</span>
+          <div id="customer_tag_group" class="intake-radio-group" role="radiogroup" aria-label="Customer tag">
+            <label class="intake-radio-option"><input type="radio" name="customer_tag" value="Construction" /> Construction</label>
+            <label class="intake-radio-option"><input type="radio" name="customer_tag" value="Landscaping" /> Landscaping</label>
+            <label class="intake-radio-option"><input type="radio" name="customer_tag" value="Tree" /> Tree</label>
+            <label class="intake-radio-option"><input type="radio" name="customer_tag" value="Roofing" /> Roofing</label>
+          </div>
+          <p class="field-hint">Applied to the customer on submit.</p>
+        </div>
+      </fieldset>
+    </section>
+
+    <section class="card">
+      <div class="intake-card-head">
+        <h2>Discovery</h2>
+        <span id="discoveryStatus" class="intake-step"></span>
+      </div>
+      <fieldset id="discoveryFieldset" class="intake-form" disabled>
+        <div id="discoveryForm" class="intake-discovery"></div>
+      </fieldset>
+    </section>
+
+    <section class="card">
+      <div class="intake-card-head">
+        <h2>Submit intake</h2>
+        <span id="notifyGate" class="badge"></span>
+        <span id="submitStatus" class="intake-step"></span>
+      </div>
+      <fieldset id="submitForm" class="intake-form" disabled>
+        <p class="field-hint">Runs the whole intake in Housecall Pro in one step: create/link customer, apply tag, create the estimate placeholder, save private notes, and text the office. Safe to re-run — completed steps are skipped.</p>
+        <div class="intake-actions">
+          <button id="btnSubmit" class="primary">Submit intake</button>
+        </div>
+        <div id="estimateLink" hidden></div>
+        <div id="submitPlan" class="intake-plan" hidden></div>
+      </fieldset>
+    </section>
+
+    <section class="card">
+      <div class="intake-card-head">
+        <h2>Recent drafts</h2>
+        <button id="btnRefresh" class="secondary">↻ Refresh</button>
+      </div>
+      <ul id="recentList" class="intake-recent"></ul>
+    </section>
+  </main>
+
+  <script src="/theme.js"></script>
+  <script src="/intake.js"></script>
+</body>
+</html>

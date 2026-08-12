@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chat Foundry — ScopeFoundry</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark')
+          ? mode
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/chatfoundry.css" />
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>💬 Chat Foundry</h1>
+        <p class="sub">by United Services Northwest &mdash; operator-controlled bulk messaging through Chatwoot.</p>
+      </div>
+      <div class="toolbar">
+        <a href="/index.html" class="btn-toolbar">🏠 Home</a>
+        <a href="/intake.html" class="btn-toolbar">📝 Intake</a>
+        <a href="/estimator-studio.html" class="btn-toolbar">🎨 Studio</a>
+        <a href="/pricebook.html" class="btn-toolbar">📋 Pricebook</a>
+        <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="cf-main">
+    <div id="msg" class="msg" hidden></div>
+
+    <!-- Start here: onboarding guide -->
+    <section class="card cf-starthere">
+      <div class="cf-card-head">
+        <h2>👋 Start here</h2>
+        <button id="btnToggleGuide" class="secondary">Hide guide</button>
+      </div>
+      <div id="guideBody">
+        <p class="cf-lead">
+          Chat Foundry sends bulk messages through Chatwoot — but only when you push a message through
+          three separate, confirmed steps. Nothing is ever sent by accident. Work top to bottom:
+        </p>
+        <ol class="cf-steps">
+          <li><strong>Set up once</strong> — open <em>Setup &amp; connection</em>, check the connection, and load inboxes &amp; tags. (Skip this after the first time.)</li>
+          <li><strong>Pick who</strong> — in <em>Audience</em>, choose a status/tags and click <em>Refresh Audience</em>. Read-only preview; nothing sends.</li>
+          <li><strong>Write it</strong> — in <em>Compose</em>, type your message (use <code>{{first_name}}</code> style fields), <em>Preview against samples</em>, and optionally have the AI <em>Suggest a rewrite</em>.</li>
+          <li><strong>Send safely</strong> — in <em>Campaign</em>, create a campaign, build the recipient list, send <em>one test</em>, then do the gated <em>bulk send</em> (with pause/resume/cancel + live progress).</li>
+          <li><strong>Review</strong> — <em>Campaign history</em> shows every send with recipient drill-down, an audit log, and CSV export.</li>
+        </ol>
+        <p id="guideSafety" class="cf-safety"></p>
+      </div>
+
+      <!-- Master live-sending control -->
+      <div class="cf-sendswitch">
+        <div class="cf-sendswitch-text">
+          <span class="cf-sendswitch-label">Live sending</span>
+          <span id="sendSwitchState" class="cf-sendswitch-state">loading…</span>
+        </div>
+        <label class="cf-switch" title="Turn live sending on or off">
+          <input type="checkbox" id="sendSwitch" />
+          <span class="cf-switch-slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Confirm modal: arming live sending -->
+    <div id="sendModal" class="cf-modal" hidden>
+      <div class="cf-modal-card" role="dialog" aria-modal="true" aria-labelledby="sendModalTitle">
+        <h3 id="sendModalTitle">⚠ Arm live sending?</h3>
+        <p>
+          This unlocks sending real messages to real customers. Individual sends still require an
+          allowlisted inbox and a per-send confirmation — but Safe mode will no longer block them.
+        </p>
+        <label class="cf-wide">Type <code id="sendModalPhraseHint">ENABLE SENDING</code> to confirm
+          <input id="sendModalPhrase" type="text" autocomplete="off" placeholder="type the phrase exactly" />
+        </label>
+        <div class="cf-modal-actions">
+          <button id="sendModalCancel" class="secondary">Cancel</button>
+          <button id="sendModalConfirm" class="primary" disabled>Arm live sending</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup (one-time): connection, accounts, inboxes, tags -->
+    <details class="cf-setup" id="setupDetails">
+      <summary><span class="cf-setup-title">🔧 Setup &amp; connection</span> <span class="cf-setup-hint">one-time — click to expand</span></summary>
+
+    <!-- Connection / config -->
+    <section class="card">
+      <div class="cf-card-head">
+        <h2>Connection</h2>
+        <button id="btnHealth" class="secondary">Check connection</button>
+      </div>
+      <div id="configBox" class="cf-status">Loading configuration…</div>
+      <p class="field-hint">
+        Uses a dedicated Chat Foundry Chatwoot token
+        (<code>CHAT_FOUNDRY_CHATWOOT_API_TOKEN</code>). The account ID is read from
+        <code>CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID</code> — discover it below, then store it in <code>.env</code>.
+      </p>
+    </section>
+
+    <!-- Accounts discovery -->
+    <section class="card">
+      <div class="cf-card-head">
+        <h2>Accounts</h2>
+        <button id="btnAccounts" class="secondary">Discover accounts</button>
+      </div>
+      <div id="accountsBox" class="cf-status">Click “Discover accounts” to list the accounts this token can access.</div>
+    </section>
+
+    <!-- Inboxes + outbound capability -->
+    <section class="card">
+      <div class="cf-card-head">
+        <h2>Inboxes</h2>
+        <button id="btnInboxes" class="secondary">Load inboxes</button>
+      </div>
+      <p class="field-hint">
+        Outbound is restricted to an explicit <strong>inbox-ID allowlist</strong>
+        (<code>CHAT_FOUNDRY_ALLOWED_INBOX_IDS</code>) — the SMS/Telnyx and Thumbtack inboxes with a
+        verified n8n relay. Any other inbox is hard-skipped.
+      </p>
+      <div id="inboxesBox" class="cf-status">No inboxes loaded yet.</div>
+    </section>
+
+    <!-- Tags -->
+    <section class="card">
+      <div class="cf-card-head">
+        <h2>Tags</h2>
+        <button id="btnTags" class="secondary">Load tags</button>
+      </div>
+      <div id="tagsBox" class="cf-status">No tags loaded yet.</div>
+    </section>
+    </details>
+
+    <!-- Audience (read-only preview) -->
+    <section class="card" id="audienceCard">
+      <div class="cf-card-head">
+        <h2>Audience</h2>
+        <button id="btnRefreshAudience" class="primary">Refresh Audience</button>
+      </div>
+      <div class="cf-filters">
+        <label>Inbox
+          <select id="fInbox"><option value="">All allowlisted</option></select>
+        </label>
+        <label>Status
+          <select id="fStatus">
+            <option value="open" selected>Open / unresolved</option>
+            <option value="pending">Pending</option>
+            <option value="snoozed">Snoozed</option>
+            <option value="resolved">Resolved</option>
+            <option value="all">All statuses</option>
+          </select>
+        </label>
+        <label>Contact search
+          <input id="fSearch" type="text" placeholder="name / phone / id" />
+        </label>
+        <label>Max recipients
+          <input id="fMax" type="number" min="0" step="1" placeholder="0 = no cap" />
+        </label>
+        <label class="cf-check"><input type="checkbox" id="fExcludeNoChannel" checked /> Exclude no contact channel</label>
+      </div>
+      <div class="cf-tagpick-wrap">
+        <span class="cf-tagpick-label">Require tags (all):</span>
+        <div id="fTags" class="cf-tagpick"><em>Load tags first.</em></div>
+      </div>
+      <div id="audienceCount" class="cf-count"></div>
+      <div id="audienceTable" class="cf-status">Set filters, then click <strong>Refresh Audience</strong>. Nothing is sent — this is preview only.</div>
+      <div class="cf-pager">
+        <button id="btnPrev" class="secondary" hidden>← Prev</button>
+        <span id="pagerInfo"></span>
+        <button id="btnNext" class="secondary" hidden>Next →</button>
+        <button id="btnExportCsv" class="secondary" hidden>⬇ Export preview CSV</button>
+      </div>
+    </section>
+
+    <!-- Message Library -->
+    <section class="card" id="libraryCard">
+      <div class="cf-card-head">
+        <h2>Message Library</h2>
+        <button id="btnNewTemplate" class="primary">+ New template</button>
+      </div>
+      <div class="cf-filters">
+        <label>Search <input id="tSearch" type="text" placeholder="name / body" /></label>
+        <label>Category <select id="tCategory"><option value="">All</option></select></label>
+        <label class="cf-check"><input type="checkbox" id="tArchived" /> Show archived</label>
+        <button id="btnReloadTemplates" class="secondary">Refresh</button>
+      </div>
+      <div id="templatesBox" class="cf-status">Loading templates…</div>
+
+      <div id="tplEditor" class="cf-editor" hidden>
+        <h3 id="tplEditorTitle">New template</h3>
+        <input type="hidden" id="eId" />
+        <div class="cf-form">
+          <label>Name <input id="eName" type="text" maxlength="200" /></label>
+          <label>Category <select id="eCategory"></select></label>
+          <label class="cf-wide">Description <input id="eDescription" type="text" /></label>
+          <label class="cf-wide">Tags (comma-separated) <input id="eTags" type="text" /></label>
+          <label class="cf-wide">Message body <textarea id="eBody" rows="7"></textarea></label>
+          <div class="cf-editor-meta"><span id="eCharCount">0 chars</span></div>
+          <label class="cf-wide">Change note (for version history) <input id="eChangeNote" type="text" placeholder="what changed" /></label>
+          <label class="cf-check"><input type="checkbox" id="eApproved" /> Approved</label>
+        </div>
+        <div class="cf-editor-actions">
+          <button id="btnSaveTemplate" class="primary">Save</button>
+          <button id="btnCancelTemplate" class="secondary">Cancel</button>
+        </div>
+      </div>
+
+      <div id="tplVersions" class="cf-versions" hidden></div>
+    </section>
+
+    <!-- Compose (placeholders + LLM rewrite) — preview only, never sends -->
+    <section class="card" id="composeCard">
+      <div class="cf-card-head">
+        <h2>Compose</h2>
+        <span class="cf-note">Preview &amp; rewrite only — nothing is sent here.</span>
+      </div>
+      <div class="cf-filters">
+        <label>Start from template
+          <select id="cTemplate"><option value="">— blank —</option></select>
+        </label>
+        <label>Preview status
+          <select id="cStatus">
+            <option value="open" selected>Open / unresolved</option>
+            <option value="pending">Pending</option>
+            <option value="snoozed">Snoozed</option>
+            <option value="resolved">Resolved</option>
+            <option value="all">All statuses</option>
+          </select>
+        </label>
+        <label>Preview inbox
+          <select id="cInbox"><option value="">All allowlisted</option></select>
+        </label>
+        <label>Samples
+          <input id="cSampleSize" type="number" min="1" max="20" value="5" />
+        </label>
+      </div>
+
+      <div class="cf-fieldchips">
+        <span class="cf-fieldchips-label">Insert field:</span>
+        <span id="cFieldChips"></span>
+      </div>
+      <label class="cf-wide cf-block">Message body
+        <textarea id="cBody" rows="7" placeholder="Hi {{first_name}}, this is United Services Northwest following up…"></textarea>
+      </label>
+      <div class="cf-editor-meta"><span id="cCharCount">0 chars</span> · <span id="cAnalysis"></span></div>
+
+      <div class="cf-compose-actions">
+        <button id="btnComposePreview" class="primary">Preview against samples</button>
+      </div>
+      <div id="composePreviewBox" class="cf-status"></div>
+
+      <div class="cf-rewrite">
+        <h3>AI rewrite <span class="cf-note">(local model — suggestion only)</span></h3>
+        <div class="cf-filters">
+          <label>Tone
+            <select id="rTone">
+              <option value="professional" selected>Professional</option>
+              <option value="friendly">Friendly</option>
+              <option value="concise">Concise</option>
+              <option value="warm">Warm</option>
+              <option value="urgent">Urgent</option>
+              <option value="apologetic">Apologetic</option>
+            </select>
+          </label>
+          <label class="cf-wide">Instruction (optional)
+            <input id="rInstruction" type="text" placeholder="e.g. shorten to two sentences and add a clear call to action" />
+          </label>
+        </div>
+        <div class="cf-compose-actions">
+          <button id="btnRewrite" class="secondary">Suggest rewrite</button>
+        </div>
+        <div id="rewriteBox" class="cf-rewrite-box" hidden>
+          <div class="cf-rewrite-cols">
+            <div class="cf-rewrite-col">
+              <h4>Current</h4>
+              <pre id="rOriginal" class="cf-rewrite-pre"></pre>
+            </div>
+            <div class="cf-rewrite-col">
+              <h4>Suggested</h4>
+              <pre id="rSuggested" class="cf-rewrite-pre"></pre>
+            </div>
+          </div>
+          <div id="rWarning" class="cf-warn" hidden></div>
+          <div class="cf-rewrite-actions">
+            <button id="btnAcceptRewrite" class="primary">Accept &amp; replace</button>
+            <button id="btnRejectRewrite" class="secondary">Reject</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Campaigns + TEST-mode single send -->
+    <section class="card" id="campaignCard">
+      <div class="cf-card-head">
+        <h2>Campaign &amp; test send</h2>
+        <span id="sendState" class="cf-badge">send state…</span>
+      </div>
+      <p class="field-hint">
+        Create a campaign from a draft + audience filters, materialize the recipient list (read-only),
+        then send <strong>one</strong> test message to verify the relay. A real bulk send arrives in the
+        next sprint. Sending stays gated behind the send flag, a typed confirmation phrase, and a checkbox.
+      </p>
+
+      <div class="cf-form">
+        <label>Campaign name <input id="kName" type="text" placeholder="e.g. July roofing follow-up" /></label>
+        <label>Audience status
+          <select id="kStatus">
+            <option value="open" selected>Open / unresolved</option>
+            <option value="pending">Pending</option>
+            <option value="snoozed">Snoozed</option>
+            <option value="resolved">Resolved</option>
+            <option value="all">All statuses</option>
+          </select>
+        </label>
+        <label>Audience inbox <select id="kInbox"><option value="">All allowlisted</option></select></label>
+        <label>Max recipients <input id="kMax" type="number" min="0" step="1" placeholder="0 = no cap" /></label>
+        <label class="cf-wide">Message body (uses the Compose box if left empty)
+          <textarea id="kBody" rows="5" placeholder="Reuses the Compose body, or type a campaign body here…"></textarea>
+        </label>
+      </div>
+      <div class="cf-tagpick-wrap">
+        <span class="cf-tagpick-label">Require tags (all):</span>
+        <div id="kTags" class="cf-tagpick"><em>Load tags first.</em></div>
+      </div>
+      <p class="field-hint">Only conversations carrying <strong>every</strong> ticked tag are included. No tags ticked = everyone matching the status/inbox above.</p>
+      <div class="cf-compose-actions">
+        <button id="btnUseAudience" class="secondary" title="Copy status, inbox, max, and tags from the Audience section">↑ Use Audience filters</button>
+        <button id="btnCreateCampaign" class="primary">Create campaign</button>
+      </div>
+
+      <div id="campaignBox" class="cf-status"></div>
+
+      <div class="cf-history-head">
+        <h3>Campaign history</h3>
+        <button id="btnReloadCampaigns" class="secondary">Refresh</button>
+      </div>
+      <div id="campaignHistory" class="cf-status">Loading campaigns…</div>
+
+      <div id="campaignDetail" class="cf-campaign-detail" hidden>
+        <div id="campaignSummary" class="cf-count"></div>
+        <div class="cf-compose-actions">
+          <button id="btnMaterialize" class="secondary">Build / refresh recipient list</button>
+        </div>
+        <div id="recipientBox" class="cf-status"></div>
+
+        <div id="testSendPanel" class="cf-testsend" hidden>
+          <h3>Send one test message</h3>
+          <p class="field-hint">
+            This sends a single live message to the first eligible recipient (or a conversation ID you
+            specify) to verify the outbound relay. Everyone else is untouched.
+          </p>
+          <div class="cf-form">
+            <label>Conversation ID (optional) <input id="kTestConv" type="text" placeholder="first eligible if empty" /></label>
+            <label class="cf-wide">Type to confirm: <code id="kPhraseHint"></code>
+              <input id="kPhrase" type="text" placeholder="type the phrase exactly" autocomplete="off" />
+            </label>
+            <label class="cf-check"><input type="checkbox" id="kConfirm" /> I understand this sends a real message.</label>
+          </div>
+          <div id="kSendState" class="cf-warn" hidden></div>
+          <div class="cf-compose-actions">
+            <button id="btnTestSend" class="primary" disabled>Send 1 test message</button>
+          </div>
+          <div id="testSendResult" class="cf-status"></div>
+        </div>
+
+        <div id="bulkSendPanel" class="cf-bulksend" hidden>
+          <h3>Bulk send</h3>
+          <p class="field-hint">
+            Sends the campaign to <strong id="bulkCount">0</strong> eligible recipients, one at a time,
+            rate-limited, with automatic retries. You can pause, resume, or cancel at any point.
+          </p>
+          <div class="cf-form">
+            <label class="cf-wide">Type to confirm: <code id="bPhraseHint"></code>
+              <input id="bPhrase" type="text" placeholder="type the phrase exactly" autocomplete="off" />
+            </label>
+            <label class="cf-check"><input type="checkbox" id="bConfirm" /> I understand this sends real messages to every eligible recipient.</label>
+          </div>
+          <div id="bSendState" class="cf-warn" hidden></div>
+          <div class="cf-bulk-actions">
+            <button id="btnBulkSend" class="primary" disabled>Start bulk send</button>
+            <button id="btnBulkResume" class="secondary" hidden>Resume</button>
+            <button id="btnBulkPause" class="secondary" hidden>Pause</button>
+            <button id="btnBulkCancel" class="ghost" hidden>Cancel</button>
+          </div>
+          <div id="bulkProgress" class="cf-progress" hidden>
+            <div class="cf-progress-bar"><div id="bulkBar" class="cf-progress-fill" style="width:0%"></div></div>
+            <div id="bulkStats" class="cf-count"></div>
+          </div>
+        </div>
+
+        <div class="cf-drilldown">
+          <div class="cf-history-head">
+            <h3>Recipients</h3>
+            <div class="cf-drill-controls">
+              <label>Status
+                <select id="dStatus">
+                  <option value="">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="sending">Sending</option>
+                  <option value="sent">Sent</option>
+                  <option value="failed">Failed</option>
+                  <option value="skipped">Skipped</option>
+                </select>
+              </label>
+              <button id="btnExportRecipients" class="secondary">⬇ Export CSV</button>
+            </div>
+          </div>
+          <div id="drillBox" class="cf-status"></div>
+          <div class="cf-pager">
+            <button id="btnDrillPrev" class="secondary" hidden>← Prev</button>
+            <span id="drillPager"></span>
+            <button id="btnDrillNext" class="secondary" hidden>Next →</button>
+          </div>
+        </div>
+
+        <div class="cf-audit">
+          <div class="cf-history-head">
+            <h3>Audit log</h3>
+            <button id="btnReloadEvents" class="secondary">Refresh</button>
+          </div>
+          <div id="auditBox" class="cf-status"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card cf-roadmap">
+      <h2>What's here</h2>
+      <p class="field-hint">
+        Chat Foundry is complete: read-only discovery, audience preview, the message library and
+        local-AI rewrite, gated test + durable bulk sending (batching, rate limiting, retry/backoff,
+        pause/resume/cancel, restart recovery), and campaign history with recipient drill-down, an
+        audit log, and CSV export. <strong>Previewing, rewriting, and sending are always separate,
+        explicitly-confirmed actions.</strong>
+      </p>
+    </section>
+  </main>
+
+  <script src="/theme.js"></script>
+  <script src="/chatfoundry.js"></script>
+</body>
+</html>

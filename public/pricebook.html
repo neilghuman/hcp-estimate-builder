@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pricebook — ScopeFoundry</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark')
+          ? mode
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/pricebook.css" />
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>ScopeFoundry <span class="page-title">/ Pricebook</span></h1>
+        <p class="sub">by United Services Northwest &mdash; Manage your curated service catalog.</p>
+      </div>
+      <div class="toolbar">
+        <a href="/" class="btn-toolbar">← Estimate Builder</a>      <a href="/intake.html" class="btn-toolbar">📝 Intake</a>      <a href="/chatfoundry.html" class="btn-toolbar">💬 Chat Foundry</a>        <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
+        <button id="btnCategories" class="btn-toolbar">🗂 Categories</button>
+        <button id="btnBackups" class="btn-toolbar">🛟 Backups</button>
+        <a href="/api/pricebook/export/download.csv" class="btn-toolbar" download>⬇ Export CSV</a>
+        <a href="/api/pricebook/template/download.csv" class="btn-toolbar" download>⬇ CSV Template</a>
+        <button id="btnImport" class="btn-toolbar">⬆ Import CSV</button>
+        <button id="btnGenerateAll" class="btn-toolbar btn-purple">⚡ Generate All</button>
+        <button id="btnAdd" class="btn-toolbar btn-green">+ Add Item</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="pb-main">
+    <!-- Filters -->
+    <div class="pb-filters card">
+      <input type="text" id="filterSearch" placeholder="Search name or description…" style="max-width:280px" />
+      <select id="filterCategory"><option value="">All categories</option></select>
+      <label class="inline-check"><input type="checkbox" id="filterInactive" /> Show inactive</label>
+      <span id="pbCount" class="pb-count"></span>
+      <div id="pbFlashMsg" class="msg pb-flash hidden"></div>
+      <div id="bulkProgress" class="bulk-progress hidden">
+        <span id="bulkMsg">Generating…</span>
+        <div class="bulk-bar-track"><div id="bulkBar" class="bulk-bar" style="width:0%"></div></div>
+        <button id="btnBulkStop" class="btn-stop" title="Stop after current item">✕</button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card pb-table-wrap">
+      <table id="pbTable">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Price</th>
+            <th>Unit</th>
+            <th>Kind</th>
+            <th>Tax</th>
+            <th>Active</th>
+            <th>AI</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="pbBody">
+          <tr><td colspan="10" class="loading">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Add/Edit modal -->
+  <div id="modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modalTitle">Add Item</h3>
+        <button class="modal-close" id="btnModalClose" aria-label="Close">&times;</button>
+      </div>
+      <form id="itemForm" autocomplete="off">
+        <input type="hidden" id="fId" />
+        <div class="form-row two-col">
+          <div class="form-group">
+            <label>Category <span class="req">*</span></label>
+            <input type="text" id="fCategory" list="categoryList" required placeholder="e.g. Turf Care" />
+            <datalist id="categoryList"></datalist>
+            <button type="button" class="link-btn" id="btnAuditCategory" style="margin-top:4px;padding:0;background:none;border:none;color:#6938ef;font-size:12px;cursor:pointer">⚖ Audit category with AI</button>
+            <div id="categoryAudit" class="cat-audit hidden" style="margin-top:6px;font-size:12px"></div>
+          </div>
+          <div class="form-group">
+            <label>Name <span class="req">*</span></label>
+            <input type="text" id="fName" required placeholder="e.g. Lawn Mowing" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Description (customer-facing)</label>
+          <textarea id="fDescription" rows="2" placeholder="Shown on the estimate…"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Estimator Notes (AI)</label>
+          <textarea id="fInternalScope" rows="2" placeholder="Crew scope and execution details"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Exclusions (AI)</label>
+          <textarea id="fExclusions" rows="2" placeholder="What is excluded from this line item"></textarea>
+        </div>
+        <div class="form-group">
+          <label>AI Scope Notes / Upsell (AI)</label>
+          <textarea id="fRecommendedNotes" rows="2" placeholder="Optional upsell or advisory notes"></textarea>
+        </div>
+        <div class="form-row three-col">
+          <div class="form-group">
+            <label>Unit Price ($) <span class="req">*</span></label>
+            <input type="number" id="fUnitPrice" step="0.01" min="0" required placeholder="120.00" />
+            <span class="field-hint">Enter in dollars. Stored as cents.</span>
+          </div>
+          <div class="form-group">
+            <label>Unit of Measure</label>
+            <input type="text" id="fUom" list="uomList" placeholder="job, sq ft, visit…" />
+            <datalist id="uomList">
+              <option value="job" /><option value="sq ft" /><option value="ft" />
+              <option value="visit" /><option value="hour" /><option value="each" />
+              <option value="application" /><option value="service" />
+            </datalist>
+          </div>
+          <div class="form-group">
+            <label>Kind</label>
+            <select id="fKind">
+              <option value="labor">labor</option>
+              <option value="materials">materials</option>
+              <option value="service">service</option>
+              <option value="discount">discount</option>
+              <option value="tax_item">tax_item</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row two-col">
+          <div class="form-group">
+            <label>Sort Order</label>
+            <input type="number" id="fSortOrder" min="0" placeholder="0" />
+          </div>
+          <div class="form-group">
+            <label>Internal Notes</label>
+            <input type="text" id="fNotes" placeholder="Not sent to HCP" />
+          </div>
+        </div>
+        <div class="form-row checks">
+          <label class="inline-check"><input type="checkbox" id="fTaxable" /> Taxable</label>
+          <label class="inline-check"><input type="checkbox" id="fActive" checked /> Active</label>
+        </div>
+        <div id="formMsg" class="msg"></div>
+        <div id="itemReview" class="item-review hidden"></div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="btnReviewItem">🔎 Review (AI)</button>
+          <button type="button" class="secondary" id="btnGenerateAi">Generate AI</button>
+          <button type="button" class="secondary" id="btnCancel">Cancel</button>
+          <button type="submit" class="primary" id="btnSave">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Import modal -->
+  <div id="importModal" class="modal-backdrop hidden">
+    <div class="modal-box" style="max-width:480px">
+      <div class="modal-header">
+        <h3>Import from CSV / Excel</h3>
+        <button class="modal-close" id="btnImportClose">&times;</button>
+      </div>
+      <p style="font-size:13px;color:#667085">Upload a file with columns: <code>id</code> (optional), <code>category</code>, <code>name</code>, <code>description</code>, <code>unit_price</code>, <code>unit_of_measure</code>, <code>kind</code>, <code>taxable</code>, <code>sort_order</code>, <code>notes</code>. Rows with existing <code>id</code> are updated; blank <code>id</code> rows are inserted.</p>
+      <div class="form-group">
+        <input type="file" id="importFile" accept=".xlsx,.xls,.csv" />
+      </div>
+      <div class="form-row checks">
+        <label class="inline-check"><input type="checkbox" id="importReplace" /> Replace all existing items (truncate first)</label>
+      </div>
+      <div id="importMsg" class="msg"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="btnImportCancel">Cancel</button>
+        <button type="button" class="primary" id="btnImportRun">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="backupModal" class="modal-backdrop hidden">
+    <div class="modal-box" style="max-width:720px">
+      <div class="modal-header">
+        <h3>Pricebook Backups</h3>
+        <button class="modal-close" id="btnBackupClose">&times;</button>
+      </div>
+      <p class="backup-help">Create timestamped SQL backups on the server. You can later download or restore any saved snapshot server-side.</p>
+      <div class="modal-actions backup-actions-top">
+        <button type="button" class="primary" id="btnBackupCreate">Create Backup Now</button>
+        <button type="button" class="secondary" id="btnBackupRefresh">Refresh List</button>
+      </div>
+      <div id="backupMsg" class="msg"></div>
+      <div id="backupList" class="backup-list loading">Loading backups…</div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="btnBackupDone">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category taxonomy management modal -->
+  <div id="categoryModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-box" style="max-width:640px">
+      <div class="modal-header">
+        <h3>Manage Categories</h3>
+        <button class="modal-close" id="btnCategoryClose" aria-label="Close">&times;</button>
+      </div>
+      <p class="backup-help">Organize your two-level service taxonomy used by AI category audits and pricing context. Renaming a category here does not move price-book items already saved under the old name — recategorize those from the table.</p>
+      <div class="cat-add-row">
+        <input type="text" id="newCategoryName" placeholder="New top-level category…" />
+        <button type="button" class="primary" id="btnCategoryAdd">+ Add</button>
+      </div>
+      <div id="categoryMsg" class="msg"></div>
+      <div id="categoryTree" class="cat-tree loading">Loading…</div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="btnCategoryDone">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="aiFieldsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-box" style="max-width:460px">
+      <div class="modal-header">
+        <h3>Update AI Fields</h3>
+        <button class="modal-close" id="btnAiFieldsClose" aria-label="Close">&times;</button>
+      </div>
+      <p id="aiFieldsHelp" class="backup-help">Choose which AI-generated fields to refresh for this item.</p>
+      <div class="ai-fields-toolbar">
+        <button type="button" class="secondary" id="btnAiFieldsSelectAll">Select All</button>
+        <button type="button" class="secondary" id="btnAiFieldsClearAll">Clear All</button>
+      </div>
+      <div class="ai-fields-list">
+        <label class="ai-field-option"><input type="checkbox" value="description" checked /> <span class="ai-field-copy"><span class="ai-field-title">Description</span><span class="ai-field-state" data-field-state="description">Has content</span></span></label>
+        <label class="ai-field-option"><input type="checkbox" value="estimator_notes" checked /> <span class="ai-field-copy"><span class="ai-field-title">Estimator Notes</span><span class="ai-field-state" data-field-state="estimator_notes">Has content</span></span></label>
+        <label class="ai-field-option"><input type="checkbox" value="exclusions" checked /> <span class="ai-field-copy"><span class="ai-field-title">Exclusions</span><span class="ai-field-state" data-field-state="exclusions">Has content</span></span></label>
+        <label class="ai-field-option"><input type="checkbox" value="ai_scope_notes" checked /> <span class="ai-field-copy"><span class="ai-field-title">AI Scope Notes</span><span class="ai-field-state" data-field-state="ai_scope_notes">Has content</span></span></label>
+      </div>
+      <div id="aiFieldsMsg" class="msg"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="btnAiFieldsCancel">Cancel</button>
+        <button type="button" class="primary" id="btnAiFieldsConfirm">Update Selected Fields</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/theme.js?v=2"></script>
+  <script src="/pricebook.js?v=13"></script>
+</body>
+</html>

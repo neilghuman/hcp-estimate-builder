@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "D:/Projects/usn-pseo"
+		}
+	],
+	"settings": {
+		"powershell.cwd": "usn-pseo"
+	}
+}

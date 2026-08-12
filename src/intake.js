@@ -1,0 +1,1022 @@
+// Customer Intake System — service module.
+//
+// Sprint 1 scope: scaffolding + the durable draft store (create / read / update / list) and a
+// non-secret config endpoint. NO Housecall Pro calls and NO notifications yet — those arrive in
+// later sprints (lookup, customer create + tags, estimate + private notes, SMS via Chatwoot).
+//
+// Design notes:
+//   - Every intake is one `customer_intakes` row that progresses draft -> submitting -> completed.
+//   - Reporting dimensions live in first-class columns; everything else rides in the `data` JSONB,
+//     so future reports and features slot in without schema rewrites.
+//   - Pure helpers are exported separately from the route wiring so they can be unit-tested.
+
+import { listEmployees, searchCustomers, getCustomer, listTags, createCustomer, applyCustomerTag, createEmptyEstimate, appendCustomerNote } from './hcp.js';
+import * as chatwoot from './chatwoot.js';
+
+// Columns a client may set on a draft. Anything not in this list is ignored (defence in depth:
+// the UPDATE only ever interpolates names from this allowlist, never client-provided keys).
+export const DRAFT_COLUMNS = [
+  'created_by', 'created_by_hcp_id',
+  'hcp_customer_id', 'customer_is_new',
+  'first_name', 'last_name', 'phone', 'email', 'company', 'secondary_phone',
+  'address_line', 'address_street', 'address_unit', 'address_city', 'address_state', 'address_zip',
+  'address_place_id', 'address_notes',
+  'customer_tag',
+  'problem', 'timeframe', 'getting_other_bids', 'final_estimate_response',
+  'decision_factor',
+  'budget', 'pictures', 'callback_time', 'callback_time_detail',
+  'additional_notes',
+  // Server-managed outcome columns (written by the gated apply/notify actions).
+  'hcp_estimate_id', 'hcp_estimate_option_id', 'hcp_estimate_number',
+  'hcp_customer_url', 'hcp_estimate_url', 'notify_status', 'notify_error',
+];
+
+export const INTAKE_STATUSES = ['draft', 'submitting', 'completed', 'failed'];
+
+export function intakeEnabled() {
+  // Feature flag — default ON. Set INTAKE_ENABLED=false to hide the API (nav is static).
+  return String(process.env.INTAKE_ENABLED ?? 'true').toLowerCase() !== 'false';
+}
+
+// Write gate for anything that MUTATES Housecall Pro (Sprint 4+). Default OFF so testing never
+// creates/updates real records; the operator flips INTAKE_WRITE_ENABLED=true deliberately.
+export function intakeWriteEnabled() {
+  return String(process.env.INTAKE_WRITE_ENABLED ?? 'false').toLowerCase() === 'true';
+}
+
+// Normalise a client patch into { columns: {allowed scalar cols}, data: {leftovers} }.
+// Pure + side-effect free so it can be unit-tested without a DB.
+export function splitPatch(patch) {
+  const columns = {};
+  const data = {};
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (k === 'data' && v && typeof v === 'object') {
+      Object.assign(data, v);
+    } else if (DRAFT_COLUMNS.includes(k)) {
+      columns[k] = v;
+    } else {
+      // Unknown keys are preserved in the JSONB snapshot rather than dropped.
+      data[k] = v;
+    }
+  }
+  return { columns, data };
+}
+
+const RETURNING = '*';
+
+export async function createDraft(pool, { createdBy = null, createdById = null } = {}) {
+  const { rows } = await pool.query(
+    `INSERT INTO customer_intakes (created_by, created_by_hcp_id) VALUES ($1, $2) RETURNING ${RETURNING}`,
+    [createdBy, createdById],
+  );
+  return rows[0];
+}
+
+// Look up by numeric id or by public_id UUID (the id used in URLs / idempotency).
+export async function getIntake(pool, idOrPublicId) {
+  const asNum = Number(idOrPublicId);
+  const byNum = Number.isInteger(asNum) && String(asNum) === String(idOrPublicId);
+  const { rows } = await pool.query(
+    byNum
+      ? `SELECT * FROM customer_intakes WHERE id = $1`
+      : `SELECT * FROM customer_intakes WHERE public_id = $1`,
+    [idOrPublicId],
+  );
+  return rows[0] || null;
+}
+
+// Patch a draft: whitelisted scalar columns + a shallow JSONB merge into `data`.
+export async function updateDraft(pool, idOrPublicId, patch) {
+  const existing = await getIntake(pool, idOrPublicId);
+  if (!existing) {
+    const err = new Error('Intake draft not found');
+    err.status = 404;
+    throw err;
+  }
+  const { columns, data } = splitPatch(patch);
+
+  const sets = [];
+  const params = [];
+  for (const [col, val] of Object.entries(columns)) {
+    params.push(val);
+    sets.push(`${col} = $${params.length}`);
+  }
+  if (Object.keys(data).length) {
+    params.push(JSON.stringify(data));
+    sets.push(`data = data || $${params.length}::jsonb`);
+  }
+  sets.push('updated_at = NOW()');
+
+  params.push(existing.id);
+  const { rows } = await pool.query(
+    `UPDATE customer_intakes SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING ${RETURNING}`,
+    params,
+  );
+  return rows[0];
+}
+
+export async function listIntakes(pool, { status = null, limit = 25 } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 25, 1), 200);
+  const { rows } = status
+    ? await pool.query(
+        `SELECT * FROM customer_intakes WHERE status = $1 ORDER BY created_at DESC LIMIT $2`,
+        [status, lim],
+      )
+    : await pool.query(
+        `SELECT * FROM customer_intakes ORDER BY created_at DESC LIMIT $1`,
+        [lim],
+      );
+  return rows;
+}
+
+// Recover intakes left mid-submit by a restart. Steps are idempotent, so we mark them 'failed'
+// (resumable) rather than auto-resuming — a customer is never double-created/-texted without intent.
+export async function recoverInterruptedIntakes(pool) {
+  const { rowCount } = await pool.query(
+    `UPDATE customer_intakes
+        SET status = 'failed',
+            error = COALESCE(error, 'Interrupted by a restart mid-submit; re-submit to resume.'),
+            updated_at = NOW()
+      WHERE status = 'submitting'`,
+  );
+  return { recovered: rowCount || 0 };
+}
+
+// Best-effort staff attribution (simple, per decision #2). Falls back to the Basic Auth user.
+export function staffName(req, bodyName) {
+  const fromBody = String(bodyName || '').trim();
+  if (fromBody) return fromBody.slice(0, 120);
+  try {
+    const hdr = (req && req.headers && req.headers.authorization) || '';
+    const [, b64] = hdr.split(' ');
+    if (b64) {
+      const [u] = Buffer.from(b64, 'base64').toString().split(':');
+      if (u) return u;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+// --- Sprint 2: customer lookup + dedupe --------------------------------------
+// Ordered lookup keys, per spec: phone > email > name. Pure so it can be unit-tested.
+export function buildLookupAttempts({ phone, email, first_name, last_name } = {}) {
+  const attempts = [];
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length >= 7) attempts.push({ by: 'phone', term: digits });
+  const em = String(email || '').trim();
+  if (em && /.+@.+\..+/.test(em)) attempts.push({ by: 'email', term: em });
+  const name = [first_name, last_name].filter(Boolean).join(' ').trim();
+  if (name.length >= 3) attempts.push({ by: 'name', term: name });
+  return attempts;
+}
+
+// Try each key in priority order; return the first that yields matches. `searchFn` is injected
+// (hcp.searchCustomers in production) so this is testable without a live HCP.
+export async function lookupCustomer(fields, searchFn) {
+  for (const a of buildLookupAttempts(fields)) {
+    const customers = await searchFn(a.term);
+    if (customers && customers.length) return { matchedBy: a.by, term: a.term, customers };
+  }
+  return { matchedBy: null, term: null, customers: [] };
+}
+
+// Map a simplified HCP customer onto draft columns when the staff links an existing record.
+// This is what prevents duplicate creation downstream: hcp_customer_id is set + customer_is_new=false.
+export function customerToDraftPatch(c) {
+  const addr = (c.addresses && c.addresses[0]) || null;
+  return {
+    hcp_customer_id: c.id,
+    customer_is_new: false,
+    first_name: c.first_name || null,
+    last_name: c.last_name || null,
+    phone: c.mobile || null,
+    email: c.email || null,
+    company: c.company || null,
+    address_line: addr ? addr.line : null,
+    address_street: addr ? addr.street : null,
+    address_unit: addr ? addr.unit : null,
+    address_city: addr ? addr.city : null,
+    address_state: addr ? addr.state : null,
+    address_zip: addr ? addr.zip : null,
+  };
+}
+
+// --- Sprint 3: customer info validation --------------------------------------
+export const REQUIRED_CUSTOMER_FIELDS = [
+  'first_name', 'last_name', 'phone', 'email',
+  'address_street', 'address_city', 'address_state', 'address_zip',
+];
+
+// Normalise a US phone to 10 digits (tolerating a leading country code). Pure.
+export function normalizePhone(raw) {
+  const d = String(raw || '').replace(/\D/g, '');
+  const ten = d.length === 11 && d.startsWith('1') ? d.slice(1) : d;
+  const valid = ten.length === 10;
+  return { digits: ten, valid, e164: valid ? `+1${ten}` : null };
+}
+
+export function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+// Field-level validation. Returns { valid, errors: { field: message } }. Pure.
+export function validateCustomer(f = {}) {
+  const errors = {};
+  const req = (k, label) => { if (!String(f[k] || '').trim()) errors[k] = `${label} is required.`; };
+  req('first_name', 'First name');
+  req('last_name', 'Last name');
+  req('address_street', 'Street address');
+  req('address_city', 'City');
+  req('address_state', 'State');
+  req('address_zip', 'ZIP code');
+  if (String(f.address_zip || '').trim() && !/^\d{5}$/.test(String(f.address_zip).trim())) {
+    errors.address_zip = 'Enter a valid 5-digit ZIP code.';
+  }
+
+  if (!String(f.phone || '').trim()) errors.phone = 'Phone is required.';
+  else if (!normalizePhone(f.phone).valid) errors.phone = 'Enter a valid 10-digit US phone.';
+
+  if (!String(f.email || '').trim()) errors.email = 'Email is required.';
+  else if (!isValidEmail(f.email)) errors.email = 'Enter a valid email address.';
+
+  // Optional, but if provided it must be a valid phone.
+  if (String(f.secondary_phone || '').trim() && !normalizePhone(f.secondary_phone).valid) {
+    errors.secondary_phone = 'Enter a valid 10-digit US phone.';
+  }
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+// Combine field validation with the create-vs-reuse decision. The customer step is only "complete"
+// when the fields are valid AND staff have either linked an existing customer or marked it new. Pure.
+export function customerStepStatus(row = {}) {
+  const v = validateCustomer(row);
+  const decisionMade = Boolean(row.hcp_customer_id) || row.customer_is_new === true;
+  const reasons = [];
+  if (!v.valid) reasons.push('Complete the required customer fields.');
+  if (!decisionMade) reasons.push('Choose an existing customer or mark this as a new customer.');
+  return { valid: v.valid, errors: v.errors, decisionMade, complete: v.valid && decisionMade, reasons };
+}
+
+// --- Sprint 4: HCP customer create + tag (WRITES) ----------------------------
+// Build the HCP create-customer payload from a draft row. Pure.
+export function buildCustomerCreatePayload(row = {}) {
+  const payload = {
+    first_name: row.first_name || undefined,
+    last_name: row.last_name || undefined,
+    email: row.email || undefined,
+    mobile_number: normalizePhone(row.phone).digits || undefined,
+    company: row.company || undefined,
+    notifications_enabled: false,
+  };
+  const secondary = normalizePhone(row.secondary_phone);
+  if (secondary.valid) payload.home_number = secondary.digits;
+  if (row.customer_tag) payload.tags = [row.customer_tag];
+  if (row.address_street) {
+    payload.addresses = [{
+      street: row.address_street,
+      street_line_2: row.address_unit || undefined,
+      city: row.address_city || undefined,
+      state: row.address_state || undefined,
+      zip: row.address_zip || undefined,
+    }];
+  }
+  return payload;
+}
+
+// --- Sprint 5: discovery questions (config-driven) ---------------------------
+// One schema drives BOTH server validation and the UI, so questions are easy to add/reorder.
+// `showIf` makes a question conditional; conditional questions are only required when visible.
+export const OFFICE_FINAL_ESTIMATE_SCRIPT =
+  "That's completely understandable. Most of our customers compare a few companies before making a " +
+  'decision. If it\'s okay with you, would you mind scheduling us as your final estimate? We\'ve found ' +
+  'that being the final estimate allows us to review the options you\'ve already received, answer any ' +
+  'remaining questions, explain any differences between proposals, and make sure you have all the ' +
+  "information you need to make the best decision for your property. Our goal isn't simply to give " +
+  'another estimate — we want to help you make the right decision.';
+
+export const DISCOVERY_QUESTIONS = [
+  { key: 'problem', label: 'What problem are you trying to solve?', type: 'textarea', required: true },
+  { key: 'timeframe', label: 'Desired timeframe', type: 'select', required: true,
+    options: ['ASAP', 'Today', 'This Week', 'Within Two Weeks', 'This Month', 'Next Month', 'Just Gathering Information', 'No Rush'] },
+  { key: 'getting_other_bids', label: 'Are you getting other bids?', type: 'select', required: true,
+    options: ['Yes', 'No', 'Unsure'] },
+  { key: 'final_estimate_response', label: 'Would you schedule us as your final estimate?', type: 'select', required: true,
+    options: ['Agreed', 'Declined', 'Unsure', 'Not Applicable'],
+    showIf: { key: 'getting_other_bids', equals: 'Yes' }, script: OFFICE_FINAL_ESTIMATE_SCRIPT },
+  { key: 'decision_factor', label: 'What is most important when choosing a contractor?', type: 'select', required: true,
+    options: ['Price', 'Quality', 'Timeline', 'Communication', 'Licensing', 'Warranty', 'Reputation', 'Unsure', 'Other'] },
+  { key: 'budget', label: 'Budget', type: 'select', required: true,
+    options: ['Under $500', '$500–1,000', '$1,000–2,500', '$2,500–5,000', '$5,000–10,000', '$10,000+', 'Prefer Not To Say'] },
+  { key: 'pictures', label: 'Would you like to send us any pictures of the project?', type: 'select', required: true,
+    options: ['Yes', 'No'] },
+  { key: 'pictures_info', type: 'info', showIf: { key: 'pictures', equals: 'Yes' },
+    text: 'Ask the customer to text or email photos of the project. (Automated photo uploads can be added here later.)' },
+  { key: 'callback_time', label: 'Best time for an estimator to reach you?', type: 'select', required: true,
+    options: ['Anytime', 'Morning', 'Afternoon', 'Evening', 'Specific Time'] },
+  { key: 'callback_time_detail', label: 'Specific time', type: 'text', required: true,
+    showIf: { key: 'callback_time', equals: 'Specific Time' } },
+  { key: 'additional_notes', label: 'Additional notes', type: 'textarea', required: false,
+    hint: 'e.g. dog in backyard, gate code, works nights, wants estimate emailed, HOA restrictions.' },
+];
+
+// A question is only in play when its showIf condition (if any) is satisfied. Pure.
+export function isQuestionVisible(q, row = {}) {
+  if (!q.showIf) return true;
+  return String(row[q.showIf.key] ?? '') === q.showIf.equals;
+}
+
+// Validate discovery answers, honouring conditional visibility + required. Pure.
+export function validateDiscovery(row = {}) {
+  const errors = {};
+  for (const q of DISCOVERY_QUESTIONS) {
+    if (q.type === 'info' || !isQuestionVisible(q, row)) continue;
+    const v = row[q.key];
+    if (q.required && (v === null || v === undefined || String(v).trim() === '')) {
+      errors[q.key] = `${q.label} is required.`;
+      continue;
+    }
+    if (q.key === 'companies_visited' && v != null && String(v).trim() !== '') {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0) errors.companies_visited = 'Enter a whole number.';
+    }
+  }
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+export function discoveryStepStatus(row = {}) {
+  const v = validateDiscovery(row);
+  return { valid: v.valid, errors: v.errors, complete: v.valid, reasons: v.valid ? [] : ['Answer the required discovery questions.'] };
+}
+
+// --- Sprint 4: estimate URL deep-link builder ----------------------------------
+// Build the direct HCP estimate deep-link. HCP deep-links use the OPTION id, not estimate id.
+// Pure.
+export function buildEstimateUrl(optionId) {
+  if (!optionId) return null;
+  return `https://pro.housecallpro.com/app/estimates/${encodeURIComponent(optionId)}`;
+}
+
+// --- Sprint 6: estimate placeholder + private notes --------------------------
+// Idempotency marker embedded in the note so re-running never double-appends. Pure.
+export function intakeNoteMarker(row = {}) {
+  return `[intake:${row.public_id}]`;
+}
+
+function noteVal(v) {
+  return (v === null || v === undefined || String(v).trim() === '') ? '—' : String(v);
+}
+
+// Build the formatted Private Notes block for an intake. Pure (date injectable for tests).
+export function buildIntakeNote(row = {}, { now = new Date() } = {}) {
+  const callback = row.callback_time === 'Specific Time' && row.callback_time_detail
+    ? `${row.callback_time} (${row.callback_time_detail})`
+    : row.callback_time;
+  return [
+    `Customer Intake ${intakeNoteMarker(row)}`,
+    `Best Callback Time: ${noteVal(callback)}`,
+    `Problem: ${noteVal(row.problem)}`,
+    `Desired Timeframe: ${noteVal(row.timeframe)}`,
+    `Receiving Other Bids: ${noteVal(row.getting_other_bids)}`,
+    `Scheduled Us Last: ${noteVal(row.final_estimate_response)}`,
+    `Biggest Decision Factor: ${noteVal(row.decision_factor)}`,
+    `Budget: ${noteVal(row.budget)}`,
+    `Pictures: ${noteVal(row.pictures)}`,
+    `Additional Notes: ${noteVal(row.additional_notes)}`,
+    `Created By: ${noteVal(row.created_by)}`,
+    `Date: ${now.toISOString()}`,
+  ].join('\n');
+}
+
+// --- Estimate "Summary of Work" ----------------------------------------------
+// The estimate is what an estimator or crew member actually opens, so the whole intake is
+// rendered into it as plain-text Question/Answer pairs under readable headings. Deliberately
+// NOT a field dump: no keys, ids, JSON or API values ever reach this text.
+//
+// Question wording comes from DISCOVERY_QUESTIONS so the schema stays the single source of
+// truth; SUMMARY_QUESTION_TEXT only overrides the few labels that read as form captions rather
+// than as something you would say to a customer.
+const SUMMARY_QUESTION_TEXT = {
+  timeframe: 'How soon are you hoping to have this done?',
+  final_estimate_response: 'Would you schedule us as your final estimate?',
+  decision_factor: 'What matters most to you when choosing a contractor?',
+  budget: 'What budget range do you have in mind?',
+  pictures: 'Will you be sending photos of the project?',
+  callback_time: 'When is the best time for an estimator to reach you?',
+  callback_time_detail: 'What specific time works best?',
+  additional_notes: 'Anything else we should know?',
+};
+
+// Which discovery questions belong under which heading, in the order they should print.
+const SUMMARY_DISCOVERY_SECTIONS = [
+  { title: 'CUSTOMER REQUEST', keys: ['problem', 'timeframe'] },
+  { title: 'COMPETING BIDS & DECISION', keys: ['getting_other_bids', 'final_estimate_response', 'decision_factor', 'budget'] },
+  { title: 'SCHEDULING & FOLLOW-UP', keys: ['callback_time', 'callback_time_detail', 'pictures'] },
+  { title: 'ADDITIONAL NOTES', keys: ['additional_notes'] },
+];
+
+// Format a US phone for humans; fall back to whatever was entered if it isn't 10 digits.
+function summaryPhone(raw) {
+  const { digits, valid } = normalizePhone(raw);
+  if (!valid) return String(raw || '').trim();
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function summaryAddressLines(row) {
+  const street = [row.address_street, row.address_unit].filter(Boolean).join(' ');
+  const cityLine = [
+    [row.address_city, row.address_state].filter(Boolean).join(', '),
+    row.address_zip,
+  ].filter(Boolean).join(' ');
+  return [street, cityLine].filter(Boolean).join('\n');
+}
+
+function hasValue(v) {
+  return v !== null && v !== undefined && String(v).trim() !== '';
+}
+
+// One "Question:/Answer:" pair. Returns null when the answer is blank and the question is
+// optional, so unanswered optional questions don't pad the summary with noise.
+function summaryPair(question, answer, { required = false } = {}) {
+  if (!hasValue(answer)) {
+    if (!required) return null;
+    return `Question: ${question}\nAnswer: Not provided`;
+  }
+  return `Question: ${question}\nAnswer: ${String(answer).trim()}`;
+}
+
+function summarySection(title, pairs) {
+  const body = pairs.filter(Boolean);
+  if (!body.length) return null;
+  return `${title}\n${'-'.repeat(title.length)}\n\n${body.join('\n\n')}`;
+}
+
+// Build the estimate's Summary of Work for an intake. Pure (date injectable for tests).
+export function buildEstimateSummary(row = {}, { now = new Date() } = {}) {
+  const sections = [];
+
+  const customerName = [row.first_name, row.last_name].filter(Boolean).join(' ');
+  sections.push(summarySection('CUSTOMER', [
+    summaryPair('Who is the customer?', customerName, { required: true }),
+    summaryPair('What company do they represent?', row.company),
+    summaryPair('What is the best phone number?', summaryPhone(row.phone), { required: true }),
+    summaryPair('Is there a secondary phone number?', summaryPhone(row.secondary_phone)),
+    summaryPair('What is their email address?', row.email, { required: true }),
+    summaryPair('Which service line is this for?', row.customer_tag),
+  ]));
+
+  sections.push(summarySection('SERVICE ADDRESS', [
+    summaryPair('Where is the work located?', summaryAddressLines(row), { required: true }),
+    summaryPair('Are there any access notes (gate code, parking, etc.)?', row.address_notes),
+  ]));
+
+  for (const section of SUMMARY_DISCOVERY_SECTIONS) {
+    const pairs = [];
+    for (const key of section.keys) {
+      const q = DISCOVERY_QUESTIONS.find((x) => x.key === key);
+      if (!q || q.type === 'info') continue;
+      // Conditional questions that were never shown to the customer are not "relevant".
+      if (!isQuestionVisible(q, row)) continue;
+      pairs.push(summaryPair(SUMMARY_QUESTION_TEXT[key] || q.label, row[key], { required: Boolean(q.required) }));
+    }
+    sections.push(summarySection(section.title, pairs));
+  }
+
+  const header = [
+    'CUSTOMER INTAKE SUMMARY',
+    `Taken ${formatSummaryDate(now)}${hasValue(row.created_by) ? ` by ${String(row.created_by).trim()}` : ''}`,
+  ].join('\n');
+
+  return [header, ...sections.filter(Boolean)].join('\n\n\n');
+}
+
+function formatSummaryDate(now) {
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Los_Angeles',
+  }).format(now);
+}
+
+// --- Sprint 7: SMS notification (via Chatwoot) -------------------------------// Office recipients for the intake notification (E.164). Neil by default; Roman omitted for now.
+export function notifyRecipients() {
+  const raw = process.env.INTAKE_NOTIFY_NUMBERS || '2064581885';
+  return raw.split(',').map((s) => s.trim()).filter(Boolean).map((s) => normalizePhone(s).e164 || s);
+}
+
+export function notifyInboxId() {
+  const v = Number(process.env.INTAKE_NOTIFY_INBOX_ID || 0);
+  return v > 0 ? v : null;
+}
+
+// --- Sprint 5: structured error logging & context tracking -----------------
+// Log intake operations with full context for debugging and audit.
+// Each log includes: intake public_id, HCP IDs, stage, error details, timestamp.
+export function logIntakeError(row, stage, error, context = {}) {
+  const details = {
+    timestamp: new Date().toISOString(),
+    intake_id: row?.public_id,
+    intake_db_id: row?.id,
+    hcp_customer_id: row?.hcp_customer_id || null,
+    hcp_estimate_id: row?.hcp_estimate_id || null,
+    hcp_estimate_option_id: row?.hcp_estimate_option_id || null,
+    estimate_number: row?.hcp_estimate_number || null,
+    stage,
+    error_message: error?.message || String(error),
+    error_status: error?.status || null,
+    error_body: error?.body || null,
+    ...context,
+  };
+  // In production, this would go to a structured logging service (e.g., CloudWatch, Datadog).
+  // For now, log to console with a marker so it's easily grep-able.
+  console.error('[INTAKE_ERROR]', JSON.stringify(details));
+  return details;
+}
+
+// --- Sprint 8: submit orchestration — shared, idempotent service steps -------
+// Each step is safe to re-run: it reuses an already-set id / marker instead of creating duplicates.
+
+// Ensure the customer exists in HCP (link / reuse-found / create) and apply the tag. Idempotent.
+export async function ensureCustomer(pool, row, { tag = row.customer_tag || null } = {}) {
+  let action;
+  let hcpId;
+  let tags = null;
+  if (row.hcp_customer_id) {
+    action = 'link-existing';
+    hcpId = row.hcp_customer_id;
+    if (tag) tags = await applyCustomerTag(hcpId, tag);
+  } else {
+    const lk = await lookupCustomer(row, (t) => searchCustomers(t));
+    if (lk.customers && lk.customers.length) {
+      action = 'reuse-found';
+      hcpId = lk.customers[0].id;
+      if (tag) tags = await applyCustomerTag(hcpId, tag);
+    } else {
+      action = 'create';
+      const payload = buildCustomerCreatePayload({ ...row, customer_tag: tag });
+      const created = await createCustomer(payload);
+      hcpId = created.id;
+      tags = payload.tags || null;
+    }
+  }
+  await updateDraft(pool, row.id, { hcp_customer_id: hcpId, customer_is_new: false, customer_tag: tag });
+  return { action, hcp_customer_id: hcpId, tags };
+}
+
+// Ensure an estimate exists with the intake summary injected as a line item. Idempotent
+// (skips if hcp_estimate_id already set). The summary is formatted as "Question:/Answer:" pairs.
+// Catches and logs errors at each stage (lookup, summary build, estimate create).
+export async function ensureEstimate(pool, row) {
+  if (row.hcp_estimate_id) {
+    return {
+      estimate_id: row.hcp_estimate_id,
+      estimate_option_id: row.hcp_estimate_option_id || null,
+      estimate_number: row.hcp_estimate_number || null,
+      created: false,
+    };
+  }
+
+  let customer;
+  try {
+    customer = await getCustomer(row.hcp_customer_id);
+  } catch (e) {
+    logIntakeError(row, 'estimate_lookup', e, { trying: 'fetch customer for address' });
+    throw new Error(`Could not fetch customer ${row.hcp_customer_id}: ${e.message}`);
+  }
+
+  const addressId = (customer.addresses && customer.addresses[0] && customer.addresses[0].id) || undefined;
+
+  let summary;
+  try {
+    summary = buildEstimateSummary(row);
+  } catch (e) {
+    logIntakeError(row, 'summary_build', e, { intake_fields_count: Object.keys(row).length });
+    throw new Error(`Could not build estimate summary: ${e.message}`);
+  }
+
+  let est;
+  try {
+    est = await createEmptyEstimate({
+      customerId: row.hcp_customer_id,
+      addressId,
+      optionName: row.customer_tag || 'Estimate',
+      summary,
+    });
+  } catch (e) {
+    logIntakeError(row, 'estimate_create', e, { summary_length: summary?.length || 0 });
+    throw new Error(`HCP estimate creation failed: ${e.message}`);
+  }
+
+  if (!est.id || !est.option_id) {
+    logIntakeError(row, 'estimate_validate', new Error('Missing response fields'), { response: est });
+    throw new Error(`HCP response missing estimate or option ID`);
+  }
+
+  try {
+    await updateDraft(pool, row.id, {
+      hcp_estimate_id: est.id,
+      hcp_estimate_option_id: est.option_id || null,
+      hcp_estimate_number: est.estimate_number == null ? null : String(est.estimate_number),
+    });
+  } catch (e) {
+    logIntakeError(row, 'estimate_persist', e, { estimate_id: est.id, option_id: est.option_id });
+    throw new Error(`Could not persist estimate to intake draft: ${e.message}`);
+  }
+
+  return {
+    estimate_id: est.id,
+    estimate_option_id: est.option_id || null,
+    estimate_number: est.estimate_number,
+    created: true,
+  };
+}
+
+// Append the intake summary to the customer's private notes. Idempotent (marker-guarded).
+// Catches and logs errors during note append.
+export async function ensureNotes(pool, row, { now } = {}) {
+  const note = buildIntakeNote(row, now ? { now } : {});
+  let res;
+  try {
+    res = await appendCustomerNote(row.hcp_customer_id, note, intakeNoteMarker(row));
+  } catch (e) {
+    logIntakeError(row, 'notes_append', e, { note_length: note.length });
+    throw new Error(`Could not append intake note to customer ${row.hcp_customer_id}: ${e.message}`);
+  }
+  return { appended: res.appended };
+}
+
+// Send the office notification. Non-fatal: records notify_status and never throws to the caller.
+export async function runNotify(pool, row) {
+  const recipients = notifyRecipients();
+  const inbox = notifyInboxId();
+  if (!chatwoot.chatwootConfigured() || !inbox) {
+    const why = !inbox ? 'no notify inbox configured' : 'chatwoot not configured';
+    await updateDraft(pool, row.id, { notify_status: 'skipped', notify_error: why });
+    return { status: 'skipped', results: [] };
+  }
+  const message = buildNotificationSms(row, {});
+  const results = [];
+  for (const to of recipients) {
+    try {
+      const { conversationId } = await chatwoot.ensureConversationForPhone(to, { inboxId: inbox, name: 'Office Notify' });
+      const msg = await chatwoot.sendMessage(conversationId, message);
+      results.push({ to, ok: true, conversationId, messageId: msg.id });
+    } catch (e) {
+      results.push({ to, ok: false, error: e.message });
+    }
+  }
+  const anyOk = results.some((r) => r.ok);
+  const allOk = results.length > 0 && results.every((r) => r.ok);
+  const errText = results.filter((r) => !r.ok).map((r) => `${r.to}: ${r.error}`).join('; ') || null;
+  const status = allOk ? 'sent' : (anyOk ? 'partial' : 'failed');
+  await updateDraft(pool, row.id, { notify_status: status, notify_error: errText });
+  return { status, results };
+}
+
+export function registerIntakeRoutes(app, pool) {
+  // Guard: when the feature flag is off, the whole API returns 404.
+  app.use('/api/intake', (req, res, next) => {
+    if (!intakeEnabled()) return res.status(404).json({ error: 'Customer Intake is disabled.' });
+    next();
+  });
+
+  // Non-secret config snapshot for the UI.
+  app.get('/api/intake/config', (_req, res) => {
+    res.json({
+      enabled: intakeEnabled(),
+      writeEnabled: intakeWriteEnabled(),
+      version: 1,
+      statuses: INTAKE_STATUSES,
+      notify: { configured: chatwoot.chatwootConfigured(), inbox: Boolean(notifyInboxId()), recipients: notifyRecipients().length },
+      googleMapsKey: process.env.GOOGLE_MAPS_KEY || '',
+    });
+  });
+
+  // Office-staff options — real HCP employees so "Created By" always matches Housecall Pro.
+  app.get('/api/intake/staff', async (_req, res) => {
+    try {
+      res.json({ staff: await listEmployees() });
+    } catch (e) {
+      res.status(e.status || 502).json({ error: `Could not load HCP staff: ${e.message}` });
+    }
+  });
+
+  // Create a new draft (optionally stamping the office staff name).
+  app.post('/api/intake/drafts', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const createdBy = staffName(req, b.created_by);
+      const row = await createDraft(pool, { createdBy, createdById: b.created_by_hcp_id || null });
+      res.status(201).json(row);
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // Fetch a draft by id or public_id.
+  app.get('/api/intake/drafts/:id', async (req, res) => {
+    try {
+      const row = await getIntake(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Intake draft not found' });
+      res.json(row);
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // Patch a draft (whitelisted columns + JSONB merge).
+  app.patch('/api/intake/drafts/:id', async (req, res) => {
+    try {
+      const row = await updateDraft(pool, req.params.id, req.body || {});
+      res.json(row);
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // Recent drafts (for a future "resume intake" list; handy for testing now).
+  app.get('/api/intake/drafts', async (req, res) => {
+    try {
+      const rows = await listIntakes(pool, { status: req.query.status, limit: req.query.limit });
+      res.json({ intakes: rows });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // --- Sprint 9: reporting foundation (read-only aggregates over intake_report) ----
+  app.get('/api/intake/report', async (_req, res) => {
+    try {
+      const [byStatus, byFinal, timing] = await Promise.all([
+        pool.query('SELECT status, COUNT(*)::int AS n FROM customer_intakes GROUP BY status ORDER BY n DESC'),
+        pool.query("SELECT COALESCE(final_estimate_response, '(n/a)') AS final_estimate_response, COUNT(*)::int AS n FROM customer_intakes WHERE getting_other_bids = 'Yes' GROUP BY 1 ORDER BY n DESC"),
+        pool.query('SELECT ROUND(AVG(minutes_to_submit)::numeric, 1) AS avg_minutes_to_submit, COUNT(*)::int AS completed FROM intake_report WHERE submitted_at IS NOT NULL'),
+      ]);
+      res.json({
+        byStatus: byStatus.rows,
+        byFinalEstimate: byFinal.rows,
+        timing: timing.rows[0] || { avg_minutes_to_submit: null, completed: 0 },
+      });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // --- Sprint 2: customer lookup + dedupe (read-only against HCP) ----
+
+  // Prioritized search (phone > email > name). Returns matches; never creates anything.
+  app.get('/api/intake/lookup', async (req, res) => {
+    try {
+      const result = await lookupCustomer(req.query, (t) => searchCustomers(t));
+      res.json(result);
+    } catch (e) {
+      res.status(e.status || 502).json({ error: `Customer lookup failed: ${e.message}` });
+    }
+  });
+
+  // Link a draft to an existing HCP customer (loads their details, blocks duplicate creation).
+  app.post('/api/intake/drafts/:id/link-customer', async (req, res) => {
+    try {
+      const hcpId = (req.body || {}).hcp_customer_id;
+      if (!hcpId) return res.status(400).json({ error: 'hcp_customer_id is required.' });
+      const customer = await getCustomer(hcpId);
+      if (!customer) return res.status(404).json({ error: 'HCP customer not found.' });
+      const row = await updateDraft(pool, req.params.id, customerToDraftPatch(customer));
+      res.json(row);
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // Mark the draft as a brand-new customer (unlinks any prior match; creation happens in Sprint 4).
+  app.post('/api/intake/drafts/:id/new-customer', async (req, res) => {
+    try {
+      const row = await updateDraft(pool, req.params.id, { hcp_customer_id: null, customer_is_new: true });
+      res.json(row);
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // --- Sprint 3: customer info validation (authoritative, server-side) ----
+
+  // Validate the stored draft's customer step (fields + create-vs-reuse decision). Read-only.
+  app.get('/api/intake/drafts/:id/customer-status', async (req, res) => {
+    try {
+      const row = await getIntake(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Intake draft not found' });
+      res.json(customerStepStatus(row));
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // --- Sprint 4: HCP customer create + tag (gated writes) ----
+
+  // Available customer tags (from HCP; read-only).
+  app.get('/api/intake/tags', async (_req, res) => {
+    try {
+      res.json({ tags: await listTags() });
+    } catch (e) {
+      res.status(e.status || 502).json({ error: `Could not load HCP tags: ${e.message}` });
+    }
+  });
+
+  // Apply the customer to Housecall Pro: create (if new) or reuse/link an existing record, then tag.
+  // dryRun returns the plan without writing. Real writes require INTAKE_WRITE_ENABLED + confirm:true.
+  app.post('/api/intake/drafts/:id/apply-customer', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const dryRun = b.dryRun === true || String(req.query.dryRun || '') === '1';
+      const row = await getIntake(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Intake draft not found' });
+
+      const tag = b.tag != null ? String(b.tag) : (row.customer_tag || null);
+      const working = { ...row, customer_tag: tag };
+      const status = customerStepStatus(working);
+      if (!status.complete) return res.status(400).json({ error: 'Customer step incomplete.', reasons: status.reasons });
+
+      // Decide the action. For a "new" customer, re-check HCP first (idempotency: reuse a late match).
+      let action;
+      let payload = null;
+      let reuseCustomerId = null;
+      if (working.hcp_customer_id) {
+        action = 'link-existing';
+      } else {
+        const lk = await lookupCustomer(working, (t) => searchCustomers(t));
+        if (lk.customers && lk.customers.length) { action = 'reuse-found'; reuseCustomerId = lk.customers[0].id; }
+        else { action = 'create'; payload = buildCustomerCreatePayload(working); }
+      }
+      const plan = { action, tag, willApplyTag: Boolean(tag), payload, reuseCustomerId };
+
+      if (dryRun) return res.json({ dryRun: true, writeEnabled: intakeWriteEnabled(), plan });
+
+      // Gate real writes.
+      if (!intakeWriteEnabled()) {
+        return res.status(403).json({ error: 'HCP writes are disabled (set INTAKE_WRITE_ENABLED=true).', gate: 'writes-disabled', plan });
+      }
+      if (b.confirm !== true) {
+        return res.status(400).json({ error: 'Confirmation required (confirm:true).', plan });
+      }
+
+      const r = await ensureCustomer(pool, working, { tag });
+      res.json({ ok: true, action: r.action, hcp_customer_id: r.hcp_customer_id, tags: r.tags, row: await getIntake(pool, req.params.id) });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // --- Sprint 5: discovery questions (read-only schema + validation) ----
+
+  // Config-driven question schema (drives the UI). Includes the office final-estimate script.
+  app.get('/api/intake/discovery-schema', (_req, res) => {
+    res.json({ questions: DISCOVERY_QUESTIONS });
+  });
+
+  // Validate the stored draft's discovery answers (conditional required honoured).
+  app.get('/api/intake/drafts/:id/discovery-status', async (req, res) => {
+    try {
+      const row = await getIntake(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Intake draft not found' });
+      res.json(discoveryStepStatus(row));
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // --- Sprint 6: estimate placeholder + private notes (gated writes) ----
+
+  // Create the empty estimate placeholder with intake summary injected. dryRun previews the plan;
+  // real writes need the gate + confirm. Returns the direct HCP estimate link.
+  // Errors at each stage are captured and logged with full context.
+  app.post('/api/intake/drafts/:id/apply-estimate', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const dryRun = b.dryRun === true || String(req.query.dryRun || '') === '1';
+      const row = await getIntake(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Intake draft not found' });
+      if (!row.hcp_customer_id) return res.status(400).json({ error: 'Apply the customer to Housecall Pro first.' });
+
+      const disc = discoveryStepStatus(row);
+      if (!disc.complete) return res.status(400).json({ error: 'Discovery incomplete.', reasons: disc.reasons });
+
+      const note = buildIntakeNote(row);
+      const plan = { willCreateEstimate: !row.hcp_estimate_id, willAppendNote: true, notePreview: note };
+      if (dryRun) return res.json({ dryRun: true, writeEnabled: intakeWriteEnabled(), plan });
+
+      if (!intakeWriteEnabled()) return res.status(403).json({ error: 'HCP writes are disabled (set INTAKE_WRITE_ENABLED=true).', gate: 'writes-disabled', plan });
+      if (b.confirm !== true) return res.status(400).json({ error: 'Confirmation required (confirm:true).', plan });
+
+      let est;
+      try {
+        est = await ensureEstimate(pool, row);
+      } catch (e) {
+        logIntakeError(row, 'apply_estimate_ensure', e);
+        return res.status(502).json({ error: `Estimate creation failed: ${e.message}`, stage: 'estimate', details: e.body });
+      }
+
+      let notes;
+      try {
+        notes = await ensureNotes(pool, row);
+      } catch (e) {
+        logIntakeError(row, 'apply_estimate_notes', e, { estimate_created: true });
+        // Log but don't fail: notes are informational, not critical. Estimate already created.
+        notes = { appended: false };
+      }
+
+      let estimateUrl;
+      try {
+        estimateUrl = buildEstimateUrl(est.estimate_option_id);
+        if (!estimateUrl) throw new Error('Failed to build estimate URL from option_id');
+      } catch (e) {
+        logIntakeError(row, 'apply_estimate_url', e, { option_id: est.estimate_option_id });
+        // Log but include partial success: estimate was created, just can't deep-link yet.
+        estimateUrl = null;
+      }
+
+      const updated = await getIntake(pool, req.params.id);
+      res.json({
+        ok: true,
+        hcp_estimate_id: est.estimate_id,
+        hcp_estimate_option_id: est.estimate_option_id,
+        estimate_number: est.estimate_number,
+        estimate_url: estimateUrl,
+        note_appended: notes.appended,
+        row: updated,
+      });
+    } catch (e) {
+      const row = await getIntake(pool, req.params.id).catch(() => null);
+      logIntakeError(row, 'apply_estimate_outer', e);
+      res.status(e.status || 500).json({ error: `Estimate apply failed: ${e.message}`, stage: 'unknown' });
+    }
+  });
+
+  // --- Sprint 7: SMS notification via Chatwoot (gated writes) ----
+
+  // Notify the office (Neil) about a new intake. dryRun previews recipients + message; a real send
+  // needs the write gate + confirm, and posts an outgoing Chatwoot message (delivered by n8n/Telnyx).
+  app.post('/api/intake/drafts/:id/notify', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const dryRun = b.dryRun === true || String(req.query.dryRun || '') === '1';
+      const row = await getIntake(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Intake draft not found' });
+
+      const recipients = notifyRecipients();
+      const message = buildNotificationSms(row, {});
+      const plan = { recipients, message, chatwootConfigured: chatwoot.chatwootConfigured(), inboxConfigured: Boolean(notifyInboxId()) };
+      if (dryRun) return res.json({ dryRun: true, writeEnabled: intakeWriteEnabled(), plan });
+
+      if (!intakeWriteEnabled()) return res.status(403).json({ error: 'HCP/SMS writes are disabled (set INTAKE_WRITE_ENABLED=true).', gate: 'writes-disabled', plan });
+      if (b.confirm !== true) return res.status(400).json({ error: 'Confirmation required (confirm:true).', plan });
+      if (!chatwoot.chatwootConfigured()) return res.status(400).json({ error: 'Chatwoot is not configured.' });
+      if (!notifyInboxId()) return res.status(400).json({ error: 'Set INTAKE_NOTIFY_INBOX_ID to an SMS-capable Chatwoot inbox.' });
+
+      const out = await runNotify(pool, row);
+      res.json({ ok: out.status !== 'failed', status: out.status, results: out.results, row: await getIntake(pool, req.params.id) });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // --- Sprint 8: submit orchestration (gated, idempotent, partial-failure aware) ----
+
+  // Run the whole intake to HCP in order: customer -> tag -> estimate -> notes -> SMS.
+  // Idempotent (reuses existing ids/marker), guards against double-submit, and records completed/failed.
+  app.post('/api/intake/drafts/:id/submit', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const dryRun = b.dryRun === true || String(req.query.dryRun || '') === '1';
+      let row = await getIntake(pool, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Intake draft not found' });
+
+      const cs = customerStepStatus(row);
+      const ds = discoveryStepStatus(row);
+      if (!cs.complete || !ds.complete) {
+        return res.status(400).json({ error: 'Intake incomplete.', reasons: [...cs.reasons, ...ds.reasons] });
+      }
+
+      const plan = {
+        customer: row.hcp_customer_id ? 'link-existing' : 'create-or-reuse',
+        tag: row.customer_tag || null,
+        estimate: row.hcp_estimate_id ? 'exists' : 'create',
+        notes: 'append',
+        sms: { recipients: notifyRecipients(), ready: chatwoot.chatwootConfigured() && Boolean(notifyInboxId()) },
+      };
+      if (dryRun) return res.json({ dryRun: true, writeEnabled: intakeWriteEnabled(), status: row.status, plan });
+
+      if (!intakeWriteEnabled()) return res.status(403).json({ error: 'HCP/SMS writes are disabled (set INTAKE_WRITE_ENABLED=true).', gate: 'writes-disabled', plan });
+      if (b.confirm !== true) return res.status(400).json({ error: 'Confirmation required (confirm:true).', plan });
+
+      // Idempotent double-submit guard.
+      if (row.status === 'completed') return res.json({ ok: true, alreadyCompleted: true, status: 'completed', row });
+      const claim = await pool.query(
+        `UPDATE customer_intakes SET status = 'submitting', updated_at = NOW() WHERE id = $1 AND status <> 'submitting' RETURNING id`,
+        [row.id],
+      );
+      if (!claim.rowCount) return res.status(409).json({ error: 'A submit is already in progress for this intake.' });
+
+      const steps = [];
+      try {
+        const c = await ensureCustomer(pool, row, { tag: row.customer_tag || null });
+        steps.push({ step: 'customer', ok: true, ...c });
+        row = await getIntake(pool, row.id);
+
+        const e = await ensureEstimate(pool, row);
+        steps.push({ step: 'estimate', ok: true, ...e });
+        row = await getIntake(pool, row.id);
+
+        const n = await ensureNotes(pool, row);
+        steps.push({ step: 'notes', ok: true, ...n });
+
+        // SMS is non-fatal: a failed notification must not fail a completed intake.
+        const s = await runNotify(pool, row);
+        steps.push({ step: 'sms', ok: s.status !== 'failed', status: s.status, results: s.results });
+
+        await pool.query(`UPDATE customer_intakes SET status = 'completed', submitted_at = NOW(), error = NULL, updated_at = NOW() WHERE id = $1`, [row.id]);
+        res.json({ ok: true, status: 'completed', steps, row: await getIntake(pool, row.id) });
+      } catch (stepErr) {
+        // A required step failed: mark failed and return partial progress (safe to re-submit — completed
+        // steps are skipped via the already-set ids/marker).
+        await pool.query(`UPDATE customer_intakes SET status = 'failed', error = $2, updated_at = NOW() WHERE id = $1`, [row.id, stepErr.message]);
+        steps.push({ step: 'error', ok: false, error: stepErr.message });
+        res.status(500).json({ ok: false, status: 'failed', steps, error: stepErr.message, row: await getIntake(pool, row.id) });
+      }
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+}
