@@ -127,7 +127,29 @@ if (draftId) {
 - ✅ UX friction removed (no manual button click)
 - ✅ Frictionless entry point (form ready on page load)
 - ✅ Deep-linking support (still works: ?t=<id>)
+- ✅ **Estimate URL stored and displayed** — appears in:
+  - SMS notification to office staff (clickable link)
+  - Intake form UI on successful submission (confirmation page)
 - ✅ No breaking changes to API or database schema
+
+## Additional Fix: Missing Estimate URL
+
+**Problem (discovered during E2E):** After submission, estimate URL was not appearing in either the SMS notification or the UI success message. This meant:
+- Office staff received SMS but couldn't click through to HCP estimate
+- Customer completion page had no link to the estimate
+
+**Root cause:** `ensureEstimate()` function was not building or storing the estimate URL after creating the estimate in HCP.
+
+**Fix:** Updated [src/intake.js](src/intake.js#L631-L645) to:
+1. Build the estimate deep-link URL using `buildEstimateUrl(est.option_id)`
+2. Store `hcp_estimate_url` in the draft row when persisting to database
+3. Return `estimate_url` in response so frontend receives it
+4. Refetch row after estimate creation ensures SMS sends with URL included
+5. Frontend displays link on success page
+
+**Result:** Estimate now appears in:
+- ✅ SMS: `https://pro.housecallpro.com/app/estimates/...`
+- ✅ UI: Success page shows "View estimate in Housecall Pro →" link
 
 ## Merging
 
