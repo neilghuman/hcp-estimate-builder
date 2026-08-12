@@ -15,6 +15,8 @@ let draftPending = null; // in-flight ensureDraft(), so a burst of edits creates
 let writeEnabled = false; // HCP write gate (from /config)
 let currentHcpLinked = false;
 let formDirty = false; // Track whether current form state has unsaved changes
+let lastPlan = null; // plan from the dry run, reused to describe the work on the submitting screen
+let submitInFlight = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -33,7 +35,12 @@ async function api(path, { method = 'GET', body } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error((data && data.error) || `${method} ${path} failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `${method} ${path} failed (${res.status})`);
+    // Carry the payload so callers can show per-step / per-reason detail.
+    if (data && typeof data === 'object') Object.assign(err, { status: res.status, reasons: data.reasons, steps: data.steps });
+    throw err;
+  }
   return data;
 }
 
@@ -638,16 +645,35 @@ async function submitIntake() {
   }
   
   try {
+    setButtonBusy($('btnSubmit'), 'Checking…');
     const res = await api(`/api/intake/drafts/${currentId}/submit`, { method: 'POST', body: { dryRun: true } });
     renderSubmitPlan(res.plan, res.status);
   } catch (e) {
     if (e.reasons) showMsg(`${e.message} ${e.reasons.join(' ')}`, 'error');
     else showMsg(e.message, 'error');
+  } finally {
+    setButtonBusy($('btnSubmit'), null);
+  }
+}
+
+// Swap a button into a disabled, spinner-labelled state, remembering its original text.
+function setButtonBusy(btn, label) {
+  if (!btn) return;
+  if (label) {
+    if (btn.dataset.idleText == null) btn.dataset.idleText = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+    btn.innerHTML = `<span class="spinner spinner-sm"></span>${escapeHtml(label)}`;
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('is-busy');
+    if (btn.dataset.idleText != null) btn.textContent = btn.dataset.idleText;
   }
 }
 
 function renderSubmitPlan(plan, status) {
   const box = $('submitPlan');
+  lastPlan = plan;
   const sms = plan.sms || {};
   box.innerHTML =
     `<p class="plan-line"><strong>This will:</strong></p>` +
@@ -669,8 +695,7 @@ function renderSubmitPlan(plan, status) {
   confirm.className = 'primary';
   confirm.textContent = 'Confirm & submit';
   confirm.disabled = !writeEnabled;
-  confirm.addEventListener('click', confirmSubmit);
-  const cancel = document.createElement('button');
+  confirm.addEventListener('click', confirmSubmit);  const cancel = document.createElement('button');
   cancel.className = 'secondary';
   cancel.textContent = 'Cancel';
   cancel.addEventListener('click', () => { box.hidden = true; });
@@ -680,16 +705,78 @@ function renderSubmitPlan(plan, status) {
   box.hidden = false;
 }
 
+// Replaces the plan with a spinner and the list of work in progress. Swapping the whole panel
+// removes the confirm button, so a slow submit cannot be double-clicked.
+function renderSubmitProgress() {
+  const p = lastPlan || {};
+  const sms = p.sms || {};
+  const steps = [
+    ['customer', p.customer === 'link-existing' ? 'Linking the customer in Housecall Pro' : 'Creating or reusing the customer in Housecall Pro'],
+    ['tag', p.tag ? `Applying the ${p.tag} tag` : null],
+    ['estimate', p.estimate === 'exists' ? 'Reusing the existing estimate' : 'Creating the estimate'],
+    ['notes', 'Saving the intake summary to private notes'],
+    ['sms', sms.ready ? `Texting the office (${(sms.recipients || []).join(', ')})` : 'Office SMS — skipped, not configured'],
+  ].filter(([, label]) => label);
+
+  const box = $('submitPlan');
+  box.innerHTML =
+    `<div class="submit-progress">` +
+      `<span class="spinner" role="status" aria-label="Submitting"></span>` +
+      `<div class="submit-progress-body">` +
+        `<p class="progress-title" id="progressTitle">Submitting intake…</p>` +
+        `<ul class="progress-steps">` +
+          steps.map(([key, label]) => `<li id="pstep_${key}"><span class="pstep-mark">·</span>${escapeHtml(label)}</li>`).join('') +
+        `</ul>` +
+        `<p class="progress-note">This usually takes a few seconds. Please keep this page open.</p>` +
+      `</div>` +
+    `</div>`;
+  box.hidden = false;
+}
+
+function markProgressSteps(steps) {
+  for (const s of steps || []) {
+    const li = $(`pstep_${s.step}`);
+    if (!li) continue;
+    li.classList.add(s.ok ? 'done' : 'failed');
+    const mark = li.querySelector('.pstep-mark');
+    if (mark) mark.textContent = s.ok ? '✓' : '✗';
+  }
+  // The tag rides along with the customer step server-side.
+  const tagLi = $('pstep_tag');
+  const customer = (steps || []).find((s) => s.step === 'customer');
+  if (tagLi && customer) {
+    tagLi.classList.add(customer.ok ? 'done' : 'failed');
+    const mark = tagLi.querySelector('.pstep-mark');
+    if (mark) mark.textContent = customer.ok ? '✓' : '✗';
+  }
+}
+
+function finishProgress(title, ok) {
+  const el = $('progressTitle');
+  if (el) {
+    el.textContent = title;
+    el.className = `progress-title ${ok ? 'ok' : 'failed'}`;
+  }
+  const sp = $('submitPlan').querySelector('.spinner');
+  if (sp) sp.remove();
+  const note = $('submitPlan').querySelector('.progress-note');
+  if (note) note.remove();
+}
+
 async function confirmSubmit() {
-  const btn = $('btnSubmit');
-  btn.disabled = true; // prevent double-click double-submit
+  if (submitInFlight) return;
+  submitInFlight = true;
+  $('btnSubmit').disabled = true;
+  renderSubmitProgress();
   try {
     const res = await api(`/api/intake/drafts/${currentId}/submit`, { method: 'POST', body: { confirm: true } });
-    $('submitPlan').hidden = true;
+    markProgressSteps(res.steps);
+    const done = res.status === 'completed';
+    finishProgress(done ? '✓ Intake submitted' : `• ${res.status}`, done);
     const el = $('submitStatus');
-    el.textContent = res.status === 'completed' ? '✓ Submitted' : `• ${res.status}`;
-    el.className = `intake-step ${res.status === 'completed' ? 'ok' : 'warn'}`;
-    showMsg(res.alreadyCompleted ? 'Already submitted.' : `Intake ${res.status}.`, res.status === 'completed' ? 'success' : 'error');
+    el.textContent = done ? '✓ Submitted' : `• ${res.status}`;
+    el.className = `intake-step ${done ? 'ok' : 'warn'}`;
+    showMsg(res.alreadyCompleted ? 'Already submitted.' : `Intake ${res.status}.`, done ? 'success' : 'error');
     const row = await api(`/api/intake/drafts/${currentId}`);
     fillForm(row);
     renderLinkState(row);
@@ -703,9 +790,12 @@ async function confirmSubmit() {
     loadRecent();
   } catch (e) {
     // Show per-step failure detail when present.
+    markProgressSteps(e.steps);
+    finishProgress('✗ Submission failed', false);
     showMsg(e.message, 'error');
   } finally {
-    btn.disabled = false;
+    submitInFlight = false;
+    $('btnSubmit').disabled = false;
   }
 }
 

@@ -334,3 +334,45 @@ button#btnSave.highlight-pulse {
     transform: translateY(0);
   }
 }
+
+/* Submit progress: instant feedback while the multi-step submit runs */
+.spinner {
+  display: inline-block;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 auto;
+  border: 2px solid var(--card-border, #ccc);
+  border-top-color: var(--primary, #6c8cff);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.spinner-sm {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-width: 2px;
+  margin-right: 0.4rem;
+  vertical-align: -1px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+button.is-busy { opacity: 0.85; cursor: progress; }
+
+.submit-progress { display: flex; gap: 0.75rem; align-items: flex-start; }
+.submit-progress-body { flex: 1; }
+
+.progress-title { margin: 0 0 0.4rem; font-weight: 600; }
+.progress-title.ok { color: #2e7d32; }
+.progress-title.failed { color: #d9534f; }
+
+.progress-steps { margin: 0; padding: 0; list-style: none; font-size: 0.9rem; }
+.progress-steps li { padding: 0.15rem 0; color: var(--muted, #888); }
+.progress-steps li.done { color: inherit; }
+.progress-steps li.failed { color: #d9534f; }
+.pstep-mark { display: inline-block; width: 1.1rem; font-weight: 700; }
+.progress-steps li.done .pstep-mark { color: #2e7d32; }
+
+.progress-note { margin: 0.5rem 0 0; font-size: 0.82rem; color: var(--muted, #888); }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2s; }
+}
