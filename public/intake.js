@@ -540,8 +540,17 @@ async function ensureDraft() {
   }
 }
 
+function formHasInput() {
+  return CUSTOMER_FIELDS.some((f) => $(f).value.trim()) || Boolean(selectedTag());
+}
+
 async function save() {
   renderFieldErrors(clientValidate());
+  // Saving an untouched form would create the empty row this lazy creation exists to avoid.
+  if (!currentId && !formHasInput()) {
+    showMsg('Enter the customer details first.', 'error');
+    return;
+  }
   try {
     await ensureDraft();
     const row = await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: collectForm() });
