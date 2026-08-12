@@ -506,6 +506,31 @@ export function notifyInboxId() {
   return v > 0 ? v : null;
 }
 
+// Build an SMS notification for the office about a new intake, including estimate link and summary.
+// Pure function with safe fallbacks for missing data.
+export function buildNotificationSms(row = {}, {  } = {}) {
+  const customerName = [row.first_name, row.last_name].filter(Boolean).join(' ') || '(no name)';
+  const tag = row.customer_tag || 'Service';
+  const location = [row.address_city, row.address_state].filter(Boolean).join(', ') || '(no location)';
+  
+  // Build the header with customer + service + location
+  const header = `${customerName} • ${tag} • ${location}`;
+  
+  // Add key summary details (problem, timeframe, budget)
+  const summaryParts = [];
+  if (row.problem) summaryParts.push(`Problem: ${String(row.problem).split('\n')[0]}`); // first line only
+  if (row.timeframe) summaryParts.push(`When: ${row.timeframe}`);
+  if (row.budget) summaryParts.push(`Budget: ${row.budget}`);
+  const summary = summaryParts.length ? summaryParts.join(' | ') : '';
+  
+  // Add estimate link if available
+  const estimateLink = row.hcp_estimate_url ? `\n${row.hcp_estimate_url}` : '';
+  
+  // Combine: header, summary, and link
+  const message = [header, summary, estimateLink].filter(Boolean).join('\n');
+  return message;
+}
+
 // --- Sprint 5: structured error logging & context tracking -----------------
 // Log intake operations with full context for debugging and audit.
 // Each log includes: intake public_id, HCP IDs, stage, error details, timestamp.
@@ -609,11 +634,21 @@ export async function ensureEstimate(pool, row) {
     throw new Error(`HCP response missing estimate or option ID`);
   }
 
+  // Build the estimate deep-link URL
+  let estimateUrl;
+  try {
+    estimateUrl = buildEstimateUrl(est.option_id);
+  } catch (e) {
+    logIntakeError(row, 'estimate_url_build', e, { option_id: est.option_id });
+    estimateUrl = null; // non-fatal; estimate created even if URL building fails
+  }
+
   try {
     await updateDraft(pool, row.id, {
       hcp_estimate_id: est.id,
       hcp_estimate_option_id: est.option_id || null,
       hcp_estimate_number: est.estimate_number == null ? null : String(est.estimate_number),
+      hcp_estimate_url: estimateUrl,
     });
   } catch (e) {
     logIntakeError(row, 'estimate_persist', e, { estimate_id: est.id, option_id: est.option_id });
@@ -624,6 +659,7 @@ export async function ensureEstimate(pool, row) {
     estimate_id: est.id,
     estimate_option_id: est.option_id || null,
     estimate_number: est.estimate_number,
+    estimate_url: estimateUrl,
     created: true,
   };
 }

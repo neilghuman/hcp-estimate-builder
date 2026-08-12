@@ -617,7 +617,6 @@ async function init() {
     initAddressAutocomplete(cfg.googleMapsKey);
   } catch (e) { showMsg(e.message, 'error'); return; }
 
-  $('btnNew').addEventListener('click', startNew);
   $('btnSave').addEventListener('click', save);
   $('btnRefresh').addEventListener('click', loadRecent);
   $('btnUnlink').addEventListener('click', unlinkCustomer);
@@ -631,9 +630,17 @@ async function init() {
   for (const f of ERR_FIELDS) {
     $(f).addEventListener('blur', () => renderFieldErrors(clientValidate()));
   }
-  setFormEnabled(false);
   await loadDiscoverySchema();
   loadRecent();
+
+  // Auto-initialize: load draft from ?t=id parameter or start a new one
+  const params = new URLSearchParams(window.location.search);
+  const draftId = params.get('t');
+  if (draftId) {
+    await loadDraft(draftId);
+  } else {
+    await startNew();
+  }
 }
 
 async function loadDiscoverySchema() {
