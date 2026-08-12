@@ -187,6 +187,75 @@ export async function createCustomer(payload) {
   return simplifyCustomer(created);
 }
 
+// Update scalar customer fields. NOTE: `addresses` is NOT writable here — PUT /customers/:id
+// accepts an addresses array and silently discards it. Use ensureCustomerAddress instead.
+export async function updateCustomer(customerId, updatePayload) {
+  const payload = {};
+  if (updatePayload.first_name != null) payload.first_name = updatePayload.first_name;
+  if (updatePayload.last_name != null) payload.last_name = updatePayload.last_name;
+  if (updatePayload.email != null) payload.email = updatePayload.email;
+  if (updatePayload.mobile_number != null) payload.mobile_number = updatePayload.mobile_number;
+  if (updatePayload.home_number != null) payload.home_number = updatePayload.home_number;
+  if (updatePayload.work_number != null) payload.work_number = updatePayload.work_number;
+  if (updatePayload.company != null) payload.company = updatePayload.company;
+
+  if (Object.keys(payload).length === 0) {
+    return getCustomer(customerId);
+  }
+
+  const updated = await hcp(`/customers/${encodeURIComponent(customerId)}`, { method: 'PUT', body: payload });
+  return simplifyCustomer(updated);
+}
+
+function normAddrPart(v) {
+  return String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function addrMatches(a, want) {
+  return normAddrPart(a.street) === normAddrPart(want.street)
+    && normAddrPart(a.street_line_2) === normAddrPart(want.street_line_2)
+    && normAddrPart(a.city) === normAddrPart(want.city)
+    && normAddrPart(a.state) === normAddrPart(want.state)
+    && normAddrPart(a.zip) === normAddrPart(want.zip);
+}
+
+export async function listCustomerAddresses(customerId) {
+  const r = await hcp(`/customers/${encodeURIComponent(customerId)}/addresses`);
+  return r.addresses || [];
+}
+
+// Make sure the customer has an address matching `addr`, returning it.
+// HCP exposes no address update/delete, so a changed address is added as a new one.
+// Idempotent: an exact match is reused rather than duplicated.
+export async function ensureCustomerAddress(customerId, addr) {
+  const want = {
+    street: addr.street || null,
+    street_line_2: addr.unit || null,
+    city: addr.city || null,
+    state: addr.state || null,
+    zip: addr.zip || null,
+  };
+  if (!want.street) return null;
+
+  const existing = await listCustomerAddresses(customerId);
+  const match = existing.find((a) => addrMatches(a, want));
+  if (match) {
+    console.log('[HCP_ADDRESS_REUSED]', { customer_id: customerId, address_id: match.id });
+    return match;
+  }
+
+  const body = { ...want, country: addr.country || 'US', type: addr.type || 'service' };
+  const created = await hcp(`/customers/${encodeURIComponent(customerId)}/addresses`, { method: 'POST', body });
+  console.log('[HCP_ADDRESS_CREATED]', {
+    customer_id: customerId,
+    address_id: created.id,
+    street: created.street,
+    city: created.city,
+    replaced_count: existing.length,
+  });
+  return created;
+}
+
 // Apply a tag by name to an existing customer: read current tags, union, write back.
 export async function applyCustomerTag(customerId, tagName) {
   const current = await hcp(`/customers/${encodeURIComponent(customerId)}`);

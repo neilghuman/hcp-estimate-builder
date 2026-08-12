@@ -13,6 +13,7 @@ const CUSTOMER_FIELDS = [
 let currentId = null; // public_id of the active draft
 let writeEnabled = false; // HCP write gate (from /config)
 let currentHcpLinked = false;
+let formDirty = false; // Track whether current form state has unsaved changes
 
 const $ = (id) => document.getElementById(id);
 
@@ -41,6 +42,31 @@ function setFormEnabled(on) {
   $('hcpForm').disabled = !on;
   $('discoveryFieldset').disabled = !on;
   $('submitForm').disabled = !on;
+}
+
+// Mark the form as having unsaved changes
+function markFormDirty() {
+  if (formDirty) return; // already dirty
+  formDirty = true;
+  const badge = $('draftBadge');
+  if (badge) {
+    badge.textContent = '● Unsaved changes';
+    badge.className = 'badge warn';
+    badge.hidden = false;
+  }
+}
+
+// Mark the form as clean (all changes saved)
+function markFormClean() {
+  if (!formDirty) return; // already clean
+  formDirty = false;
+  const badge = $('draftBadge');
+  if (badge) {
+    badge.textContent = '✓ Saved';
+    badge.className = 'badge ok';
+    badge.hidden = false;
+    setTimeout(() => { badge.hidden = true; }, 2000);
+  }
 }
 
 
@@ -185,13 +211,31 @@ function collectForm() {
 
 function markActive(row) {
   currentId = row.public_id;
+  formDirty = false; // Fresh load = clean state
   const badge = $('draftBadge');
   badge.hidden = false;
   badge.textContent = `Draft ${row.public_id.slice(0, 8)} · ${row.status}`;
   setFormEnabled(true);
+  setupFormDirtyTracking(); // Add listeners to mark form as dirty on changes
   renderLinkState(row);
   refreshStepStatus();
   refreshDiscoveryStatus();
+}
+
+// Set up event listeners on customer fields to mark form as dirty
+function setupFormDirtyTracking() {
+  for (const f of CUSTOMER_FIELDS) {
+    const el = $(f);
+    if (el) {
+      el.addEventListener('input', markFormDirty);
+      el.addEventListener('change', markFormDirty);
+    }
+  }
+  // Also track customer tag changes
+  const tagInputs = document.querySelectorAll('input[name="customer_tag"]');
+  for (const inp of tagInputs) {
+    inp.addEventListener('change', markFormDirty);
+  }
 }
 
 // --- Sprint 2: customer lookup + dedupe ---
@@ -400,6 +444,7 @@ function buildDiscovery() {
 
     const evt = q.type === 'select' ? 'change' : 'input';
     control.addEventListener(evt, () => {
+      markFormDirty(); // Mark form as dirty when discovery answers change
       applyDiscoveryVisibility();
       clearTimeout(discoveryTimer);
       discoveryTimer = setTimeout(saveDiscovery, 400);
@@ -489,7 +534,8 @@ async function save() {
   try {
     const row = await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: collectForm() });
     $('savedAt').textContent = `Saved ${new Date(row.updated_at).toLocaleTimeString()}`;
-    showMsg('Draft saved.', 'success');
+    markFormClean(); // Mark form as clean after successful save
+    showMsg('✓ Your changes are saved. Ready to submit the intake.', 'success');
     loadRecent();
     refreshStepStatus();
   } catch (e) { showMsg(e.message, 'error'); }
@@ -532,8 +578,44 @@ function escapeHtml(s) {
 }
 
 // --- Sprint 8: submit orchestration ---
+// Visually highlight the Save & Continue button and show inline help text
+function highlightSaveButton() {
+  const btn = $('btnSave');
+  // Remove highlight if it exists
+  btn.classList.remove('highlight-pulse');
+  // Trigger reflow to restart animation
+  void btn.offsetWidth;
+  // Add highlight class for pulse animation
+  btn.classList.add('highlight-pulse');
+  // Show inline help text
+  const helpEl = document.createElement('div');
+  helpEl.id = 'saveHelpInline';
+  helpEl.className = 'intake-help-inline';
+  helpEl.textContent = '↑ Please save your changes before submitting.';
+  // Remove old help text if it exists
+  const old = $('saveHelpInline');
+  if (old) old.remove();
+  // Insert after the button area
+  btn.parentElement.insertAdjacentElement('afterend', helpEl);
+  // Auto-remove help text after 5 seconds
+  setTimeout(() => { if ($('saveHelpInline')) $('saveHelpInline').remove(); }, 5000);
+}
+
 async function submitIntake() {
   if (!currentId) { showMsg('Start an intake first.', 'error'); return; }
+  
+  // Check if form has unsaved changes
+  if (formDirty) {
+    showMsg('⚠ Please save your changes before submitting the intake.', 'error');
+    // Scroll to Save & Continue button
+    $('btnSave').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Highlight the button to draw attention
+    highlightSaveButton();
+    // Set keyboard focus for accessibility
+    $('btnSave').focus();
+    return;
+  }
+  
   try {
     const res = await api(`/api/intake/drafts/${currentId}/submit`, { method: 'POST', body: { dryRun: true } });
     renderSubmitPlan(res.plan, res.status);

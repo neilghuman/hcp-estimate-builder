@@ -34,6 +34,8 @@
   background: var(--surface, #eee);
   border: 1px solid var(--card-border, #ddd);
 }
+.badge.ok { color: #2e7d32; border-color: #2e7d32; background: rgba(46, 125, 50, 0.1); }
+.badge.warn { color: #b26a00; border-color: #b26a00; background: rgba(178, 106, 0, 0.1); }
 
 .intake-form[disabled] {
   opacity: 0.55;
@@ -140,6 +142,18 @@
 .field-hint {
   font-size: 0.8rem;
   color: var(--muted, #888);
+}
+
+.intake-hint-save {
+  font-size: 0.8rem;
+  color: #b26a00;
+  font-weight: 500;
+  margin-top: 0.35rem;
+  margin-bottom: 0;
+  padding: 0.4rem 0.6rem;
+  background: rgba(178, 106, 0, 0.08);
+  border-left: 3px solid #b26a00;
+  border-radius: 0 4px 4px 0;
 }
 
 .intake-recent {
@@ -285,3 +299,38 @@
 
 
 
+
+/* Sprint 5: Save button highlight and pulse animation */
+@keyframes highlight-pulse {
+  0% { background-color: var(--primary, #6c8cff); transform: scale(1); }
+  50% { background-color: #ff9800; transform: scale(1.05); box-shadow: 0 0 0 8px rgba(255, 152, 0, 0.3); }
+  100% { background-color: var(--primary, #6c8cff); transform: scale(1); box-shadow: none; }
+}
+
+button#btnSave.highlight-pulse {
+  animation: highlight-pulse 0.8s ease-in-out 3;
+  font-weight: bold;
+}
+
+.intake-help-inline {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: rgba(255, 152, 0, 0.1);
+  border-left: 3px solid #ff9800;
+  color: #b26a00;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 4px;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -258,6 +258,7 @@ test('buildCustomerCreatePayload maps fields, normalises phones, sets tag + addr
   assert.deepEqual(p.tags, ['Tree']);
   assert.deepEqual(p.addresses, [{
     street: '1 Fir St', street_line_2: 'Apt 2', city: 'Everett', state: 'WA', zip: '98201',
+    country: 'US', type: 'service',
   }]);
 });
 
