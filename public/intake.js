@@ -11,6 +11,7 @@ const CUSTOMER_FIELDS = [
 ];
 
 let currentId = null; // public_id of the active draft
+let draftPending = null; // in-flight ensureDraft(), so a burst of edits creates only one row
 let writeEnabled = false; // HCP write gate (from /config)
 let currentHcpLinked = false;
 let formDirty = false; // Track whether current form state has unsaved changes
@@ -46,6 +47,7 @@ function setFormEnabled(on) {
 
 // Mark the form as having unsaved changes
 function markFormDirty() {
+  ensureDraft().catch((e) => showMsg(e.message, 'error'));
   if (formDirty) return; // already dirty
   formDirty = true;
   const badge = $('draftBadge');
@@ -216,7 +218,6 @@ function markActive(row) {
   badge.hidden = false;
   badge.textContent = `Draft ${row.public_id.slice(0, 8)} · ${row.status}`;
   setFormEnabled(true);
-  setupFormDirtyTracking(); // Add listeners to mark form as dirty on changes
   renderLinkState(row);
   refreshStepStatus();
   refreshDiscoveryStatus();
@@ -491,8 +492,8 @@ function fillDiscovery(row) {
 }
 
 async function saveDiscovery() {
-  if (!currentId) return;
   try {
+    await ensureDraft();
     await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: collectDiscovery() });
     refreshDiscoveryStatus();
     loadRecent();
@@ -517,21 +518,32 @@ async function refreshDiscoveryStatus() {
   } catch { /* non-fatal */ }
 }
 
-async function startNew() {
-  try {
+// The draft row is created on the first real edit, not on page load — otherwise merely opening
+// or refreshing the page litters customer_intakes with empty rows.
+async function ensureDraft() {
+  if (currentId) return currentId;
+  if (draftPending) return draftPending;
+  draftPending = (async () => {
     const row = await api('/api/intake/drafts', { method: 'POST' });
-    fillForm(row);
-    markActive(row);
-    showMsg('New intake started.', 'success');
+    currentId = row.public_id;
+    const badge = $('draftBadge');
+    badge.hidden = false;
+    badge.textContent = `Draft ${row.public_id.slice(0, 8)} · ${row.status}`;
+    renderLinkState(row);
     loadRecent();
-    $('first_name').focus();
-  } catch (e) { showMsg(e.message, 'error'); }
+    return currentId;
+  })();
+  try {
+    return await draftPending;
+  } finally {
+    draftPending = null;
+  }
 }
 
 async function save() {
-  if (!currentId) { showMsg('Start an intake first.', 'error'); return; }
   renderFieldErrors(clientValidate());
   try {
+    await ensureDraft();
     const row = await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: collectForm() });
     $('savedAt').textContent = `Saved ${new Date(row.updated_at).toLocaleTimeString()}`;
     markFormClean(); // Mark form as clean after successful save
@@ -714,14 +726,15 @@ async function init() {
   }
   await loadDiscoverySchema();
   loadRecent();
+  setupFormDirtyTracking();
 
-  // Auto-initialize: load draft from ?t=id parameter or start a new one
   const params = new URLSearchParams(window.location.search);
   const draftId = params.get('t');
   if (draftId) {
     await loadDraft(draftId);
   } else {
-    await startNew();
+    setFormEnabled(true);
+    $('first_name').focus();
   }
 }
 
