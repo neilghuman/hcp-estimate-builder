@@ -10,7 +10,7 @@
 //     so future reports and features slot in without schema rewrites.
 //   - Pure helpers are exported separately from the route wiring so they can be unit-tested.
 
-import { listEmployees, searchCustomers, getCustomer, listTags, createCustomer, applyCustomerTag, createEmptyEstimate, appendCustomerNote } from './hcp.js';
+import { listEmployees, searchCustomers, getCustomer, listTags, createCustomer, ensureCustomerAddress, applyCustomerTag, createEmptyEstimate, appendCustomerNote } from './hcp.js';
 import * as chatwoot from './chatwoot.js';
 
 // Columns a client may set on a draft. Anything not in this list is ignored (defence in depth:
@@ -278,6 +278,8 @@ export function buildCustomerCreatePayload(row = {}) {
       city: row.address_city || undefined,
       state: row.address_state || undefined,
       zip: row.address_zip || undefined,
+      country: 'US',
+      type: 'service',
     }];
   }
   return payload;
@@ -563,6 +565,7 @@ export async function ensureCustomer(pool, row, { tag = row.customer_tag || null
   let action;
   let hcpId;
   let tags = null;
+
   if (row.hcp_customer_id) {
     action = 'link-existing';
     hcpId = row.hcp_customer_id;
@@ -581,8 +584,29 @@ export async function ensureCustomer(pool, row, { tag = row.customer_tag || null
       tags = payload.tags || null;
     }
   }
+  // The intake address must reach HCP even for a pre-existing customer. Addresses are a
+  // separate sub-resource; a failure here must not lose an otherwise good submission.
+  let address = null;
+  try {
+    address = await syncIntakeAddress(row, hcpId);
+  } catch (e) {
+    logIntakeError(row, 'customer_address_sync', e, { hcp_customer_id: hcpId });
+  }
+
   await updateDraft(pool, row.id, { hcp_customer_id: hcpId, customer_is_new: false, customer_tag: tag });
-  return { action, hcp_customer_id: hcpId, tags };
+  return { action, hcp_customer_id: hcpId, tags, hcp_address_id: address ? address.id : null };
+}
+
+// Push the intake's address to HCP and return the matching HCP address (idempotent).
+async function syncIntakeAddress(row, hcpId) {
+  if (!row.address_street) return null;
+  return ensureCustomerAddress(hcpId, {
+    street: row.address_street,
+    unit: row.address_unit,
+    city: row.address_city,
+    state: row.address_state,
+    zip: row.address_zip,
+  });
 }
 
 // Ensure an estimate exists with the intake summary injected as a line item. Idempotent
@@ -598,15 +622,24 @@ export async function ensureEstimate(pool, row) {
     };
   }
 
-  let customer;
+  // Bind the estimate to the address the intake actually captured, not merely the
+  // customer's first address (which may be a stale one — HCP addresses are append-only).
+  let addressId;
   try {
-    customer = await getCustomer(row.hcp_customer_id);
+    const addr = await syncIntakeAddress(row, row.hcp_customer_id);
+    if (addr) addressId = addr.id;
   } catch (e) {
-    logIntakeError(row, 'estimate_lookup', e, { trying: 'fetch customer for address' });
-    throw new Error(`Could not fetch customer ${row.hcp_customer_id}: ${e.message}`);
+    logIntakeError(row, 'estimate_address', e, { hcp_customer_id: row.hcp_customer_id });
   }
-
-  const addressId = (customer.addresses && customer.addresses[0] && customer.addresses[0].id) || undefined;
+  if (!addressId) {
+    try {
+      const customer = await getCustomer(row.hcp_customer_id);
+      addressId = (customer.addresses && customer.addresses[0] && customer.addresses[0].id) || undefined;
+    } catch (e) {
+      logIntakeError(row, 'estimate_lookup', e, { trying: 'fetch customer for address' });
+      throw new Error(`Could not fetch customer ${row.hcp_customer_id}: ${e.message}`);
+    }
+  }
 
   let summary;
   try {
