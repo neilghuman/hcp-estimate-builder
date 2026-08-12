@@ -21,19 +21,46 @@ User reported two UX issues with S7 changes:
 
 ## Changes Made
 
-### 1. Added `buildNotificationSms` function ([src/intake.js](src/intake.js#L505-L512))
+### 1. Added `buildNotificationSms` function ([src/intake.js](src/intake.js#L505-L522))
 ```javascript
 export function buildNotificationSms(row = {}, {  } = {}) {
   const customerName = [row.first_name, row.last_name].filter(Boolean).join(' ') || '(no name)';
-  const phone = normalizePhone(row.phone).e164 || row.phone || '(no phone)';
   const tag = row.customer_tag || 'Service';
   const location = [row.address_city, row.address_state].filter(Boolean).join(', ') || '(no location)';
-  const estimateNum = row.hcp_estimate_number ? ` | Est. #${row.hcp_estimate_number}` : '';
-  return `New intake: ${customerName} ${phone} | ${tag} | ${location}${estimateNum}`;
+  
+  // Build the header with customer + service + location
+  const header = `${customerName} • ${tag} • ${location}`;
+  
+  // Add key summary details (problem, timeframe, budget)
+  const summaryParts = [];
+  if (row.problem) summaryParts.push(`Problem: ${String(row.problem).split('\n')[0]}`);
+  if (row.timeframe) summaryParts.push(`When: ${row.timeframe}`);
+  if (row.budget) summaryParts.push(`Budget: ${row.budget}`);
+  const summary = summaryParts.length ? summaryParts.join(' | ') : '';
+  
+  // Add estimate link if available
+  const estimateLink = row.hcp_estimate_url ? `\n${row.hcp_estimate_url}` : '';
+  
+  // Combine: header, summary, and link
+  const message = [header, summary, estimateLink].filter(Boolean).join('\n');
+  return message;
 }
 ```
 
-**Purpose:** Builds a brief SMS notification for the office about a new intake. Format: `"New intake: John Smith +12065551234 | Landscaping | Seattle, WA | Est. #1234"`. Pure function, deterministic, includes null-safe fallbacks.
+**Purpose:** Builds a comprehensive SMS notification for the office about a new intake. Format:
+```
+John Smith • Landscaping • Seattle, WA
+Problem: Needs tree removal | When: ASAP | Budget: $5,000–10,000
+https://pro.housecallpro.com/app/estimates/...
+```
+
+Includes:
+- Customer name + service category + location (header)
+- Problem statement (first line only, concise)
+- Timeframe and budget (key decision factors)
+- Clickable estimate deep-link
+
+Safe fallbacks for missing data; pure function, deterministic.
 
 **Usage:** 
 - Called by POST /api/intake/drafts/:id/notify (S7 endpoint)
@@ -76,7 +103,10 @@ if (draftId) {
 2. ✅ Fill customer + discovery fields
 3. ✅ Click "Submit intake" → dry-run preview appears
 4. ✅ Click "Confirm & submit" → no error, flow completes end-to-end
-5. ✅ SMS notification sent to office (via Chatwoot)
+5. ✅ SMS notification sent to office (via Chatwoot) with:
+   - Customer name + service + location header
+   - Problem statement + timeframe + budget summary
+   - Clickable estimate deep-link
 6. ✅ Estimate created in Housecall Pro
 7. ✅ All 129 tests pass
 
