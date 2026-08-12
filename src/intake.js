@@ -634,11 +634,21 @@ export async function ensureEstimate(pool, row) {
     throw new Error(`HCP response missing estimate or option ID`);
   }
 
+  // Build the estimate deep-link URL
+  let estimateUrl;
+  try {
+    estimateUrl = buildEstimateUrl(est.option_id);
+  } catch (e) {
+    logIntakeError(row, 'estimate_url_build', e, { option_id: est.option_id });
+    estimateUrl = null; // non-fatal; estimate created even if URL building fails
+  }
+
   try {
     await updateDraft(pool, row.id, {
       hcp_estimate_id: est.id,
       hcp_estimate_option_id: est.option_id || null,
       hcp_estimate_number: est.estimate_number == null ? null : String(est.estimate_number),
+      hcp_estimate_url: estimateUrl,
     });
   } catch (e) {
     logIntakeError(row, 'estimate_persist', e, { estimate_id: est.id, option_id: est.option_id });
@@ -649,6 +659,7 @@ export async function ensureEstimate(pool, row) {
     estimate_id: est.id,
     estimate_option_id: est.option_id || null,
     estimate_number: est.estimate_number,
+    estimate_url: estimateUrl,
     created: true,
   };
 }
