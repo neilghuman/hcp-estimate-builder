@@ -695,7 +695,8 @@ function renderSubmitPlan(plan, status) {
   confirm.className = 'primary';
   confirm.textContent = 'Confirm & submit';
   confirm.disabled = !writeEnabled;
-  confirm.addEventListener('click', confirmSubmit);  const cancel = document.createElement('button');
+  confirm.addEventListener('click', confirmSubmit);
+  const cancel = document.createElement('button');
   cancel.className = 'secondary';
   cancel.textContent = 'Cancel';
   cancel.addEventListener('click', () => { box.hidden = true; });
@@ -751,8 +752,16 @@ function markProgressSteps(steps) {
   }
 }
 
-function finishProgress(title, ok) {
-  const el = $('progressTitle');
+// A short-circuited re-submit reports completion without a steps[] breakdown.
+function markAllProgressStepsDone() {
+  for (const li of document.querySelectorAll('.progress-steps li')) {
+    li.classList.add('done');
+    const mark = li.querySelector('.pstep-mark');
+    if (mark) mark.textContent = '✓';
+  }
+}
+
+function finishProgress(title, ok) {  const el = $('progressTitle');
   if (el) {
     el.textContent = title;
     el.className = `progress-title ${ok ? 'ok' : 'failed'}`;
@@ -770,8 +779,9 @@ async function confirmSubmit() {
   renderSubmitProgress();
   try {
     const res = await api(`/api/intake/drafts/${currentId}/submit`, { method: 'POST', body: { confirm: true } });
-    markProgressSteps(res.steps);
     const done = res.status === 'completed';
+    if (res.steps) markProgressSteps(res.steps);
+    else if (done) markAllProgressStepsDone();
     finishProgress(done ? '✓ Intake submitted' : `• ${res.status}`, done);
     const el = $('submitStatus');
     el.textContent = done ? '✓ Submitted' : `• ${res.status}`;
