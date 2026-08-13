@@ -13,8 +13,10 @@ import {
   intakeNoteMarker, buildIntakeNote, buildEstimateSummary,
   notifyRecipients, buildNotificationSms,
   ensureCustomer, ensureEstimate, recoverInterruptedIntakes,
+  buildCustomerSms, buildConfirmationEmail, runCustomerSms, runCustomerEmail,
 } from '../src/intake.js';
 import { unionTags } from '../src/hcp.js';
+import { resolveBrand, brandsStatus } from '../src/brands.js';
 
 // --- mock pool -------------------------------------------------------------
 function makePool(responder) {
@@ -453,6 +455,102 @@ test('buildNotificationSms formats the office alert with key details and estimat
   assert.ok(!sms.includes('second line'), 'only the first line of the project is included');
   assert.match(sms, /Budget: \$1,000 - \$5,000/);
   assert.match(sms, /pro\.housecallpro\.com\/app\/estimates\/best_1/);
+});
+
+// --- Customer communications: brand routing + SMS/email builders -----------
+test('resolveBrand maps intake tags to brand + inbox (case-insensitive, alias-aware)', () => {
+  assert.equal(resolveBrand('Landscaping').company, 'Washington Landscaping');
+  assert.equal(resolveBrand('landscaping').inboxId, 7);
+  assert.equal(resolveBrand('Tree').company, 'Washington Tree Services');
+  assert.equal(resolveBrand('Trees').company, 'Washington Tree Services'); // alias
+  assert.equal(resolveBrand('Roofing').company, 'Washington Roofing');
+  assert.equal(resolveBrand('Construction').company, 'Washington Construction');
+  assert.equal(resolveBrand('Pressure Washing').company, 'Washington Pressure Washing');
+  assert.equal(resolveBrand('Firewood').company, 'Washington Firewood');
+  assert.equal(resolveBrand('Firewood').inboxId, null); // no inbox configured yet
+  assert.equal(resolveBrand('Nonsense'), null);
+  assert.equal(resolveBrand(''), null);
+});
+
+test('resolveBrand honours per-brand env inbox override', () => {
+  process.env.INTAKE_BRAND_FIREWOOD_INBOX_ID = '42';
+  assert.equal(resolveBrand('Firewood').inboxId, 42);
+  delete process.env.INTAKE_BRAND_FIREWOOD_INBOX_ID;
+});
+
+test('brandsStatus reports readiness per brand', () => {
+  const s = brandsStatus();
+  const land = s.find((b) => b.key === 'landscaping');
+  assert.ok(land && land.smsReady === true);
+  const fire = s.find((b) => b.key === 'firewood');
+  assert.ok(fire && fire.smsReady === false);
+});
+
+test('buildCustomerSms greets by first name, names the company, invites photo replies, no time promise', () => {
+  const brand = resolveBrand('Landscaping');
+  const sms = buildCustomerSms({ first_name: 'Maria' }, brand);
+  assert.match(sms, /Hello Maria, thank you for choosing Washington Landscaping/);
+  assert.match(sms, /reply to this text/i);
+  assert.match(sms, /look forward to working with you/i);
+  // Must not promise a specific contact time.
+  assert.ok(!/\b\d{1,2}\s?(am|pm)\b/i.test(sms), 'no specific time in SMS');
+});
+
+test('buildCustomerSms falls back gracefully when name/brand missing', () => {
+  const sms = buildCustomerSms({}, null);
+  assert.match(sms, /Hello there, thank you for choosing our team/);
+});
+
+test('buildConfirmationEmail returns branded subject, html and text', () => {
+  const brand = resolveBrand('Roofing');
+  const { subject, html, text } = buildConfirmationEmail({ first_name: 'Sam' }, brand);
+  assert.equal(subject, "We've received your request — Washington Roofing");
+  assert.match(html, /Washington Roofing/);
+  assert.match(html, /Hi Sam,/);
+  assert.match(html, /Have photos of the project\?/);
+  assert.match(text, /Thank you for contacting Washington Roofing\./);
+  assert.match(text, /reply to that text message/i);
+});
+
+test('buildConfirmationEmail escapes HTML in dynamic values', () => {
+  const brand = resolveBrand('Roofing');
+  const { html } = buildConfirmationEmail({ first_name: '<script>x</script>' }, brand);
+  assert.ok(!html.includes('<script>x</script>'));
+  assert.match(html, /&lt;script&gt;/);
+});
+
+test('runCustomerSms short-circuits when already sent (no writes)', async () => {
+  const pool = makePool(() => { throw new Error('pool should not be queried'); });
+  const res = await runCustomerSms(pool, { id: 1, customer_sms_status: 'sent' });
+  assert.deepEqual(res, { status: 'sent', skipped: true });
+  assert.equal(pool.calls.length, 0);
+});
+
+test('runCustomerSms skips (records status) when the brand has no inbox', async () => {
+  const row = { id: 1, customer_tag: 'Firewood', phone: '2064581885', first_name: 'A' };
+  const pool = makePool(() => ({ rows: [row] }));
+  const res = await runCustomerSms(pool, row);
+  assert.equal(res.status, 'skipped');
+  assert.match(res.error, /no Chatwoot inbox/);
+  assert.ok(pool.calls.length > 0, 'status was recorded');
+});
+
+test('runCustomerEmail short-circuits when already sent (no writes)', async () => {
+  const pool = makePool(() => { throw new Error('pool should not be queried'); });
+  const res = await runCustomerEmail(pool, { id: 1, customer_email_status: 'sent' });
+  assert.deepEqual(res, { status: 'sent', skipped: true });
+  assert.equal(pool.calls.length, 0);
+});
+
+test('runCustomerEmail skips when email is not configured', async () => {
+  const row = { id: 1, customer_tag: 'Landscaping', email: 'c@example.com' };
+  const pool = makePool(() => ({ rows: [row] }));
+  const prevHost = process.env.INTAKE_SMTP_HOST;
+  delete process.env.INTAKE_SMTP_HOST;
+  const res = await runCustomerEmail(pool, row);
+  assert.equal(res.status, 'skipped');
+  assert.match(res.error, /email not configured/);
+  if (prevHost != null) process.env.INTAKE_SMTP_HOST = prevHost;
 });
 
 // --- Sprint 8: submit orchestration (idempotent service steps) --------------
