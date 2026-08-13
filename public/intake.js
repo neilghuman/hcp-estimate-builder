@@ -394,137 +394,6 @@ async function refreshStepStatus() {
   } catch { /* non-fatal */ }
 }
 
-// --- Sprint 5: discovery questions (schema-driven) ---
-let discoverySchema = [];
-let discoveryTimer = null;
-
-function dqVisible(q, values) {
-  if (!q.showIf) return true;
-  return String(values[q.showIf.key] ?? '') === q.showIf.equals;
-}
-
-function buildDiscovery() {
-  const form = $('discoveryForm');
-  form.innerHTML = '';
-  for (const q of discoverySchema) {
-    const wrap = document.createElement('div');
-    wrap.dataset.key = q.key;
-
-    if (q.type === 'info') {
-      wrap.className = 'dq-info';
-      wrap.dataset.info = '1';
-      wrap.textContent = q.text || '';
-      form.appendChild(wrap);
-      continue;
-    }
-
-    wrap.className = 'dq-field';
-    if (q.script) {
-      const s = document.createElement('div');
-      s.className = 'dq-script';
-      s.textContent = q.script;
-      wrap.appendChild(s);
-    }
-    const label = document.createElement('label');
-    label.setAttribute('for', `dq_${q.key}`);
-    label.innerHTML = `${escapeHtml(q.label)}${q.required ? ' <span class="req">*</span>' : ''}`;
-    wrap.appendChild(label);
-
-    let control;
-    if (q.type === 'select') {
-      control = document.createElement('select');
-      control.innerHTML = '<option value="">Select…</option>';
-      for (const o of q.options) {
-        const opt = document.createElement('option');
-        opt.value = o; opt.textContent = o;
-        control.appendChild(opt);
-      }
-    } else if (q.type === 'textarea') {
-      control = document.createElement('textarea');
-    } else {
-      control = document.createElement('input');
-      control.type = q.type === 'number' ? 'number' : 'text';
-      if (q.type === 'number') control.min = '0';
-    }
-    control.id = `dq_${q.key}`;
-    control.name = q.key;
-    if (q.hint) control.placeholder = q.hint;
-
-    const evt = q.type === 'select' ? 'change' : 'input';
-    control.addEventListener(evt, () => {
-      markFormDirty(); // Mark form as dirty when discovery answers change
-      applyDiscoveryVisibility();
-      clearTimeout(discoveryTimer);
-      discoveryTimer = setTimeout(saveDiscovery, 400);
-    });
-    wrap.appendChild(control);
-
-    const err = document.createElement('small');
-    err.className = 'field-err';
-    err.id = `dqerr_${q.key}`;
-    err.hidden = true;
-    wrap.appendChild(err);
-
-    form.appendChild(wrap);
-  }
-}
-
-function collectDiscovery() {
-  const out = {};
-  for (const q of discoverySchema) {
-    if (q.type === 'info') continue;
-    const el = $(`dq_${q.key}`);
-    if (!el) continue;
-    out[q.key] = el.value.trim() === '' ? null : el.value.trim();
-  }
-  return out;
-}
-
-function applyDiscoveryVisibility() {
-  const values = collectDiscovery();
-  for (const q of discoverySchema) {
-    const wrap = $('discoveryForm').querySelector(`[data-key="${q.key}"]`);
-    if (!wrap) continue;
-    wrap.hidden = !dqVisible(q, values);
-  }
-}
-
-function fillDiscovery(row) {
-  for (const q of discoverySchema) {
-    if (q.type === 'info') continue;
-    const el = $(`dq_${q.key}`);
-    if (el) el.value = row[q.key] == null ? '' : row[q.key];
-  }
-  applyDiscoveryVisibility();
-}
-
-async function saveDiscovery() {
-  try {
-    await ensureDraft();
-    await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: collectDiscovery() });
-    refreshDiscoveryStatus();
-    loadRecent();
-  } catch (e) { showMsg(e.message, 'error'); }
-}
-
-async function refreshDiscoveryStatus() {
-  if (!currentId) return;
-  try {
-    const st = await api(`/api/intake/drafts/${currentId}/discovery-status`);
-    for (const q of discoverySchema) {
-      if (q.type === 'info') continue;
-      const err = $(`dqerr_${q.key}`);
-      const wrap = $('discoveryForm').querySelector(`[data-key="${q.key}"]`);
-      if (!err || !wrap) continue;
-      if (st.errors && st.errors[q.key]) { err.textContent = st.errors[q.key]; err.hidden = false; wrap.classList.add('dq-invalid'); }
-      else { err.textContent = ''; err.hidden = true; wrap.classList.remove('dq-invalid'); }
-    }
-    const el = $('discoveryStatus');
-    if (st.complete) { el.textContent = '✓ Discovery complete'; el.className = 'intake-step ok'; }
-    else { el.textContent = `• ${(st.reasons || []).join(' ')}`; el.className = 'intake-step warn'; }
-  } catch { /* non-fatal */ }
-}
-
 // The draft row is created on the first real edit, not on page load — otherwise merely opening
 // or refreshing the page litters customer_intakes with empty rows.
 async function ensureDraft() {
@@ -821,6 +690,7 @@ async function init() {
   } catch (e) { showMsg(e.message, 'error'); return; }
 
   $('btnSave').addEventListener('click', save);
+  $('btnSaveDiscovery').addEventListener('click', saveDiscovery);
   $('btnRefresh').addEventListener('click', loadRecent);
   $('btnUnlink').addEventListener('click', unlinkCustomer);
   $('btnSubmit').addEventListener('click', submitIntake);
@@ -847,12 +717,206 @@ async function init() {
   }
 }
 
+// --- Sprint 1: Discovery Questions ---
+
+let discoverySchema = [];
+
 async function loadDiscoverySchema() {
   try {
     const { questions } = await api('/api/intake/discovery-schema');
     discoverySchema = questions || [];
     buildDiscovery();
   } catch (e) { showMsg(e.message, 'error'); }
+}
+
+// Build the discovery form UI from the schema.
+function buildDiscovery() {
+  const form = $('discoveryForm');
+  if (!form) return;
+  form.innerHTML = '';
+  
+  for (const q of discoverySchema) {
+    const wrap = document.createElement('div');
+    wrap.className = 'discovery-field';
+    wrap.setAttribute('data-key', q.id);
+    
+    const label = document.createElement('label');
+    label.className = 'discovery-label';
+    label.textContent = q.text;
+    if (q.required) {
+      const req = document.createElement('span');
+      req.className = 'discovery-required';
+      req.textContent = '*';
+      label.appendChild(req);
+    }
+    wrap.appendChild(label);
+    
+    if (q.help_text) {
+      const hint = document.createElement('div');
+      hint.className = 'discovery-hint';
+      hint.textContent = q.help_text;
+      wrap.appendChild(hint);
+    }
+    
+    const field = renderDiscoveryField(q);
+    wrap.appendChild(field);
+    
+    const err = document.createElement('div');
+    err.id = `dqerr_${q.id}`;
+    err.className = 'discovery-error';
+    err.hidden = true;
+    wrap.appendChild(err);
+    
+    form.appendChild(wrap);
+  }
+  
+  // Attach change listeners for dirty tracking.
+  for (const q of discoverySchema) {
+    const field = $('discoveryForm').querySelector(`[data-key="${q.id}"]`);
+    if (!field) continue;
+    const inputs = field.querySelectorAll('input, select, textarea');
+    for (const inp of inputs) {
+      inp.addEventListener('input', markFormDirty);
+      inp.addEventListener('change', markFormDirty);
+    }
+  }
+}
+
+// Render a single discovery question field (textarea, select, pills).
+function renderDiscoveryField(q) {
+  const wrap = document.createElement('div');
+  wrap.className = 'discovery-field-input';
+  
+  if (q.type === 'textarea') {
+    const ta = document.createElement('textarea');
+    ta.id = `dq_${q.id}`;
+    ta.className = 'discovery-textarea';
+    ta.placeholder = q.placeholder || '';
+    ta.required = !!q.required;
+    wrap.appendChild(ta);
+  } else if (q.type === 'select') {
+    const sel = document.createElement('select');
+    sel.id = `dq_${q.id}`;
+    sel.className = 'discovery-select';
+    sel.required = !!q.required;
+    
+    const blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = q.placeholder || 'Select an option';
+    sel.appendChild(blank);
+    
+    for (const opt of (q.options || [])) {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = opt.label;
+      sel.appendChild(option);
+    }
+    wrap.appendChild(sel);
+  } else if (q.type === 'text') {
+    const inp = document.createElement('input');
+    inp.id = `dq_${q.id}`;
+    inp.type = 'text';
+    inp.className = 'discovery-input';
+    inp.placeholder = q.placeholder || '';
+    inp.required = !!q.required;
+    wrap.appendChild(inp);
+  }
+  
+  return wrap;
+}
+
+// Populate discovery form from a saved draft row.
+function fillDiscovery(row) {
+  for (const q of discoverySchema) {
+    const inp = $(`dq_${q.id}`);
+    if (!inp) continue;
+    const val = row[q.id] == null ? '' : String(row[q.id]);
+    if (inp.tagName === 'SELECT' || inp.tagName === 'INPUT') {
+      inp.value = val;
+    } else if (inp.tagName === 'TEXTAREA') {
+      inp.value = val;
+    }
+  }
+}
+
+// Collect discovery form data into a patch object.
+function collectDiscovery() {
+  const patch = {};
+  for (const q of discoverySchema) {
+    const inp = $(`dq_${q.id}`);
+    if (!inp) continue;
+    const val = (inp.value || '').trim();
+    patch[q.id] = val || null;
+  }
+  return patch;
+}
+
+// Validate discovery form (client-side, mirrors server).
+function validateDiscovery() {
+  const errors = {};
+  for (const q of discoverySchema) {
+    const inp = $(`dq_${q.id}`);
+    if (!inp) continue;
+    const val = (inp.value || '').trim();
+    if (q.required && !val) {
+      errors[q.id] = `${q.text} is required`;
+    }
+  }
+  return errors;
+}
+
+// Save discovery form via PATCH.
+async function saveDiscovery() {
+  try {
+    const errors = validateDiscovery();
+    if (Object.keys(errors).length) {
+      renderDiscoveryFieldErrors(errors);
+      showMsg('Please fill in all required fields.', 'error');
+      return;
+    }
+    await ensureDraft();
+    await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: collectDiscovery() });
+    formDirty = false;
+    const badge = $('draftBadge');
+    if (badge) badge.textContent = `Draft ${currentId.slice(0, 8)} · saved`;
+    refreshDiscoveryStatus();
+    loadRecent();
+  } catch (e) { showMsg(e.message, 'error'); }
+}
+
+// Render field-level errors for discovery questions.
+function renderDiscoveryFieldErrors(errors) {
+  for (const q of discoverySchema) {
+    const err = $(`dqerr_${q.id}`);
+    const wrap = $('discoveryForm').querySelector(`[data-key="${q.id}"]`);
+    if (!err || !wrap) continue;
+    if (errors[q.id]) {
+      err.textContent = errors[q.id];
+      err.hidden = false;
+      wrap.classList.add('dq-invalid');
+    } else {
+      err.textContent = '';
+      err.hidden = true;
+      wrap.classList.remove('dq-invalid');
+    }
+  }
+}
+
+// Refresh the discovery section status badge.
+async function refreshDiscoveryStatus() {
+  if (!currentId) return;
+  try {
+    const st = await api(`/api/intake/drafts/${currentId}/discovery-status`);
+    const el = $('discoveryStatus');
+    if (!el) return;
+    if (st.complete) {
+      el.textContent = '✓ Discovery complete';
+      el.className = 'intake-step ok';
+    } else {
+      el.textContent = `• ${(st.reasons || []).join(' ')}`;
+      el.className = 'intake-step warn';
+    }
+  } catch { /* non-fatal */ }
 }
 
 init();

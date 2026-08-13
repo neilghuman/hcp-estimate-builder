@@ -22,16 +22,109 @@ export const DRAFT_COLUMNS = [
   'address_line', 'address_street', 'address_unit', 'address_city', 'address_state', 'address_zip',
   'address_place_id', 'address_notes',
   'customer_tag',
-  'problem', 'timeframe', 'getting_other_bids', 'final_estimate_response',
-  'decision_factor',
-  'budget', 'pictures', 'callback_time', 'callback_time_detail',
-  'additional_notes',
+  // Discovery: universal questions (Sprint 1 revised schema).
+  'project_description', 'buying_priority', 'buying_stage',
+  'getting_estimates', 'budget', 'photos_provided',
+  'contact_time', 'additional_notes',
   // Server-managed outcome columns (written by the gated apply/notify actions).
   'hcp_estimate_id', 'hcp_estimate_option_id', 'hcp_estimate_number',
   'hcp_customer_url', 'hcp_estimate_url', 'notify_status', 'notify_error',
 ];
 
 export const INTAKE_STATUSES = ['draft', 'submitting', 'completed', 'failed'];
+
+// === Sprint 1: Discovery Questions Schema ===
+// Universal questions that apply across all services.
+// Each question: id (key), text, type (textarea/text/select/pills), required, placeholder, options[], showWhen (for S2 conditionals).
+export const DISCOVERY_QUESTIONS = [
+  // Sprint 1 Revised: 9 questions (merged Q1+Q3, removed Q10, reworded Q11)
+  {
+    id: 'project_description',
+    text: 'Tell us about your project and when you\'d like it completed.',
+    type: 'textarea',
+    required: true,
+    placeholder: 'Describe what you need and your ideal timeline...',
+  },
+  {
+    id: 'buying_priority',
+    text: 'What matters most to you when selecting a contractor?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select what matters most',
+    options: [
+      { label: 'Quality of work', value: 'quality' },
+      { label: 'Price / value for money', value: 'price' },
+      { label: 'Warranty / guarantee', value: 'warranty' },
+      { label: 'Reputation / trusted company', value: 'reputation' },
+      { label: 'Speed / get it done fast', value: 'speed' },
+      { label: 'Not sure', value: 'not-sure' },
+    ],
+  },
+  {
+    id: 'buying_stage',
+    text: 'Where are you in the process of moving forward?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select your stage',
+    options: [
+      { label: 'Ready to move forward', value: 'ready' },
+      { label: 'Comparing different options', value: 'comparing' },
+      { label: 'Planning / setting budget', value: 'planning' },
+      { label: 'Still researching', value: 'researching' },
+    ],
+  },
+  {
+    id: 'getting_estimates',
+    text: 'Are you getting estimates from other companies? If so, can you share your other estimate schedules so we don\'t book you at the same time?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select an option',
+    options: [
+      { label: 'Yes, I\'m comparing estimates', value: 'yes' },
+      { label: 'No, just getting one from you', value: 'no' },
+      { label: 'Planning to get more estimates', value: 'planning' },
+    ],
+  },
+  {
+    id: 'budget',
+    text: 'What\'s your budget range?',
+    type: 'text',
+    required: false,
+    placeholder: 'e.g. around $5,000, or not sure yet (optional)',
+  },
+  {
+    id: 'photos_provided',
+    text: 'Do you have any photos of the project?',
+    type: 'select',
+    required: false,
+    placeholder: 'Select an option',
+    help_text: 'If so, you\'ll receive a text message after the call that you can simply reply to with any photos you\'d prefer to share.',
+    options: [
+      { label: 'Yes, I have photos', value: 'yes' },
+      { label: 'No, I don\'t have any', value: 'no' },
+    ],
+  },
+  {
+    id: 'contact_time',
+    text: 'What is the best time for us to contact you via telephone?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select preferred time',
+    options: [
+      { label: 'Morning (8am - 12pm)', value: 'morning' },
+      { label: 'Afternoon (12pm - 5pm)', value: 'afternoon' },
+      { label: 'Evening (5pm - 8pm)', value: 'evening' },
+      { label: 'Anytime works', value: 'anytime' },
+    ],
+  },
+  {
+    id: 'additional_notes',
+    text: 'Anything else we should know?',
+    type: 'textarea',
+    required: false,
+    placeholder: 'Additional details, concerns, or questions (optional)...',
+  },
+];
 
 export function intakeEnabled() {
   // Feature flag — default ON. Set INTAKE_ENABLED=false to hide the API (nav is static).
@@ -296,52 +389,25 @@ export const OFFICE_FINAL_ESTIMATE_SCRIPT =
   "information you need to make the best decision for your property. Our goal isn't simply to give " +
   'another estimate — we want to help you make the right decision.';
 
-export const DISCOVERY_QUESTIONS = [
-  { key: 'problem', label: 'What problem are you trying to solve?', type: 'textarea', required: true },
-  { key: 'timeframe', label: 'Desired timeframe', type: 'select', required: true,
-    options: ['ASAP', 'Today', 'This Week', 'Within Two Weeks', 'This Month', 'Next Month', 'Just Gathering Information', 'No Rush'] },
-  { key: 'getting_other_bids', label: 'Are you getting other bids?', type: 'select', required: true,
-    options: ['Yes', 'No', 'Unsure'] },
-  { key: 'final_estimate_response', label: 'Would you schedule us as your final estimate?', type: 'select', required: true,
-    options: ['Agreed', 'Declined', 'Unsure', 'Not Applicable'],
-    showIf: { key: 'getting_other_bids', equals: 'Yes' }, script: OFFICE_FINAL_ESTIMATE_SCRIPT },
-  { key: 'decision_factor', label: 'What is most important when choosing a contractor?', type: 'select', required: true,
-    options: ['Price', 'Quality', 'Timeline', 'Communication', 'Licensing', 'Warranty', 'Reputation', 'Unsure', 'Other'] },
-  { key: 'budget', label: 'Budget', type: 'select', required: true,
-    options: ['Under $500', '$500–1,000', '$1,000–2,500', '$2,500–5,000', '$5,000–10,000', '$10,000+', 'Prefer Not To Say'] },
-  { key: 'pictures', label: 'Would you like to send us any pictures of the project?', type: 'select', required: true,
-    options: ['Yes', 'No'] },
-  { key: 'pictures_info', type: 'info', showIf: { key: 'pictures', equals: 'Yes' },
-    text: 'Ask the customer to text or email photos of the project. (Automated photo uploads can be added here later.)' },
-  { key: 'callback_time', label: 'Best time for an estimator to reach you?', type: 'select', required: true,
-    options: ['Anytime', 'Morning', 'Afternoon', 'Evening', 'Specific Time'] },
-  { key: 'callback_time_detail', label: 'Specific time', type: 'text', required: true,
-    showIf: { key: 'callback_time', equals: 'Specific Time' } },
-  { key: 'additional_notes', label: 'Additional notes', type: 'textarea', required: false,
-    hint: 'e.g. dog in backyard, gate code, works nights, wants estimate emailed, HOA restrictions.' },
-];
-
 // A question is only in play when its showIf condition (if any) is satisfied. Pure.
 export function isQuestionVisible(q, row = {}) {
   if (!q.showIf) return true;
   return String(row[q.showIf.key] ?? '') === q.showIf.equals;
 }
 
-// Validate discovery answers, honouring conditional visibility + required. Pure.
+// Validate discovery answers using new sprint 1 revised schema. Pure.
 export function validateDiscovery(row = {}) {
   const errors = {};
-  for (const q of DISCOVERY_QUESTIONS) {
-    if (q.type === 'info' || !isQuestionVisible(q, row)) continue;
-    const v = row[q.key];
-    if (q.required && (v === null || v === undefined || String(v).trim() === '')) {
-      errors[q.key] = `${q.label} is required.`;
-      continue;
-    }
-    if (q.key === 'companies_visited' && v != null && String(v).trim() !== '') {
-      const n = Number(v);
-      if (!Number.isInteger(n) || n < 0) errors.companies_visited = 'Enter a whole number.';
+  
+  // Check required discovery questions
+  const requiredQuestions = DISCOVERY_QUESTIONS.filter(q => q.required);
+  for (const q of requiredQuestions) {
+    const val = String(row[q.id] || '').trim();
+    if (!val) {
+      errors[q.id] = `${q.text} is required.`;
     }
   }
+  
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
@@ -370,19 +436,15 @@ function noteVal(v) {
 
 // Build the formatted Private Notes block for an intake. Pure (date injectable for tests).
 export function buildIntakeNote(row = {}, { now = new Date() } = {}) {
-  const callback = row.callback_time === 'Specific Time' && row.callback_time_detail
-    ? `${row.callback_time} (${row.callback_time_detail})`
-    : row.callback_time;
   return [
     `Customer Intake ${intakeNoteMarker(row)}`,
-    `Best Callback Time: ${noteVal(callback)}`,
-    `Problem: ${noteVal(row.problem)}`,
-    `Desired Timeframe: ${noteVal(row.timeframe)}`,
-    `Receiving Other Bids: ${noteVal(row.getting_other_bids)}`,
-    `Scheduled Us Last: ${noteVal(row.final_estimate_response)}`,
-    `Biggest Decision Factor: ${noteVal(row.decision_factor)}`,
+    `Project & Timeline: ${noteVal(row.project_description)}`,
+    `What Matters Most: ${noteVal(row.buying_priority)}`,
+    `Buying Stage: ${noteVal(row.buying_stage)}`,
+    `Getting Other Estimates: ${noteVal(row.getting_estimates)}`,
     `Budget: ${noteVal(row.budget)}`,
-    `Pictures: ${noteVal(row.pictures)}`,
+    `Has Photos: ${noteVal(row.photos_provided)}`,
+    `Best Contact Time: ${noteVal(row.contact_time)}`,
     `Additional Notes: ${noteVal(row.additional_notes)}`,
     `Created By: ${noteVal(row.created_by)}`,
     `Date: ${now.toISOString()}`,
@@ -398,21 +460,21 @@ export function buildIntakeNote(row = {}, { now = new Date() } = {}) {
 // truth; SUMMARY_QUESTION_TEXT only overrides the few labels that read as form captions rather
 // than as something you would say to a customer.
 const SUMMARY_QUESTION_TEXT = {
-  timeframe: 'How soon are you hoping to have this done?',
-  final_estimate_response: 'Would you schedule us as your final estimate?',
-  decision_factor: 'What matters most to you when choosing a contractor?',
-  budget: 'What budget range do you have in mind?',
-  pictures: 'Will you be sending photos of the project?',
-  callback_time: 'When is the best time for an estimator to reach you?',
-  callback_time_detail: 'What specific time works best?',
+  project_description: 'What is the project and ideal timeline?',
+  buying_priority: 'What matters most when choosing a contractor?',
+  buying_stage: 'Where are they in the decision process?',
+  getting_estimates: 'Are they getting other estimates (and can they share schedules)?',
+  budget: 'What budget range do they have in mind?',
+  photos_provided: 'Will they be sending photos of the project?',
+  contact_time: 'When is the best time to reach them by phone?',
   additional_notes: 'Anything else we should know?',
 };
 
 // Which discovery questions belong under which heading, in the order they should print.
 const SUMMARY_DISCOVERY_SECTIONS = [
-  { title: 'CUSTOMER REQUEST', keys: ['problem', 'timeframe'] },
-  { title: 'COMPETING BIDS & DECISION', keys: ['getting_other_bids', 'final_estimate_response', 'decision_factor', 'budget'] },
-  { title: 'SCHEDULING & FOLLOW-UP', keys: ['callback_time', 'callback_time_detail', 'pictures'] },
+  { title: 'CUSTOMER REQUEST', keys: ['project_description'] },
+  { title: 'DECISION & BUDGET', keys: ['buying_priority', 'buying_stage', 'getting_estimates', 'budget'] },
+  { title: 'SCHEDULING & FOLLOW-UP', keys: ['contact_time', 'photos_provided'] },
   { title: 'ADDITIONAL NOTES', keys: ['additional_notes'] },
 ];
 
@@ -474,11 +536,11 @@ export function buildEstimateSummary(row = {}, { now = new Date() } = {}) {
   for (const section of SUMMARY_DISCOVERY_SECTIONS) {
     const pairs = [];
     for (const key of section.keys) {
-      const q = DISCOVERY_QUESTIONS.find((x) => x.key === key);
+      const q = DISCOVERY_QUESTIONS.find((x) => x.id === key);
       if (!q || q.type === 'info') continue;
       // Conditional questions that were never shown to the customer are not "relevant".
       if (!isQuestionVisible(q, row)) continue;
-      pairs.push(summaryPair(SUMMARY_QUESTION_TEXT[key] || q.label, row[key], { required: Boolean(q.required) }));
+      pairs.push(summaryPair(SUMMARY_QUESTION_TEXT[key] || q.text, row[key], { required: Boolean(q.required) }));
     }
     sections.push(summarySection(section.title, pairs));
   }
@@ -518,10 +580,9 @@ export function buildNotificationSms(row = {}, {  } = {}) {
   // Build the header with customer + service + location
   const header = `${customerName} • ${tag} • ${location}`;
   
-  // Add key summary details (problem, timeframe, budget)
+  // Add key summary details (project, budget)
   const summaryParts = [];
-  if (row.problem) summaryParts.push(`Problem: ${String(row.problem).split('\n')[0]}`); // first line only
-  if (row.timeframe) summaryParts.push(`When: ${row.timeframe}`);
+  if (row.project_description) summaryParts.push(`Project: ${String(row.project_description).split('\n')[0]}`); // first line only
   if (row.budget) summaryParts.push(`Budget: ${row.budget}`);
   const summary = summaryParts.length ? summaryParts.join(' | ') : '';
   
@@ -805,14 +866,14 @@ export function registerIntakeRoutes(app, pool) {
   // --- Sprint 9: reporting foundation (read-only aggregates over intake_report) ----
   app.get('/api/intake/report', async (_req, res) => {
     try {
-      const [byStatus, byFinal, timing] = await Promise.all([
+      const [byStatus, byEstimates, timing] = await Promise.all([
         pool.query('SELECT status, COUNT(*)::int AS n FROM customer_intakes GROUP BY status ORDER BY n DESC'),
-        pool.query("SELECT COALESCE(final_estimate_response, '(n/a)') AS final_estimate_response, COUNT(*)::int AS n FROM customer_intakes WHERE getting_other_bids = 'Yes' GROUP BY 1 ORDER BY n DESC"),
+        pool.query("SELECT COALESCE(getting_estimates, '(n/a)') AS getting_estimates, COUNT(*)::int AS n FROM customer_intakes GROUP BY 1 ORDER BY n DESC"),
         pool.query('SELECT ROUND(AVG(minutes_to_submit)::numeric, 1) AS avg_minutes_to_submit, COUNT(*)::int AS completed FROM intake_report WHERE submitted_at IS NOT NULL'),
       ]);
       res.json({
         byStatus: byStatus.rows,
-        byFinalEstimate: byFinal.rows,
+        byGettingEstimates: byEstimates.rows,
         timing: timing.rows[0] || { avg_minutes_to_submit: null, completed: 0 },
       });
     } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
