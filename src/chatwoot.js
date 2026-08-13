@@ -156,6 +156,21 @@ export async function getConversation(conversationId) {
 // Post an OUTGOING message into a conversation. This is the only Chat Foundry call that causes a
 // customer-facing message (delivered by the existing n8n Telnyx/Thumbtack outbound relays).
 // Returns { id, content } for the created message; the id is stored as the idempotency key.
+// Reopen a resolved/snoozed conversation so a newly-added message is visible to agents.
+// Non-fatal by design: a failure here must never block the actual message send.
+export async function reopenConversation(conversationId) {
+  const acc = requireAccount();
+  try {
+    await cwFetch(`/api/v1/accounts/${acc}/conversations/${Number(conversationId)}/toggle_status`, {
+      method: 'POST',
+      body: { status: 'open' },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function sendMessage(conversationId, content) {
   const acc = requireAccount();
   const text = String(content || '').trim();
@@ -199,12 +214,32 @@ export async function ensureConversationForPhone(phoneNumber, { inboxId, name } 
     sourceId = ci && ci.source_id ? ci.source_id : null;
   }
 
-  // 3) Open a conversation and return its id.
-  const conv = await cwFetch(`/api/v1/accounts/${acc}/conversations`, {
-    method: 'POST',
-    body: { inbox_id: inbox, contact_id: contact.id, source_id: sourceId },
-  });
-  const cid = conv && (conv.id ?? (conv.payload && conv.payload.id) ?? (conv.data && conv.data.id));
+  // 3) Reuse the contact's existing conversation in this inbox if one exists; otherwise open a new
+  //    one. SMS is a single thread per phone number, so posting each outbound message to a brand-new
+  //    conversation would fragment the thread. Matches the inbound Telnyx->Chatwoot relay, which
+  //    threads incoming messages into the most recent conversation for the contact in this inbox.
+  let cid = null;
+  try {
+    const list = await cwFetch(`/api/v1/accounts/${acc}/contacts/${contact.id}/conversations`);
+    const convs = (list && (list.payload || (list.data && list.data.payload))) || [];
+    const existing = convs.find((c) => Number(c.inbox_id) === inbox);
+    cid = existing ? existing.id : null;
+    // A reused conversation that was resolved should reopen now that we're adding a new message
+    // (phone/SMS threads only — Thumbtack is handled by separate n8n workflows and is untouched).
+    if (existing && existing.status === 'resolved') {
+      await reopenConversation(cid);
+    }
+  } catch {
+    // Non-fatal: fall through to creating a new conversation if the lookup fails.
+  }
+
+  if (!cid) {
+    const conv = await cwFetch(`/api/v1/accounts/${acc}/conversations`, {
+      method: 'POST',
+      body: { inbox_id: inbox, contact_id: contact.id, source_id: sourceId },
+    });
+    cid = conv && (conv.id ?? (conv.payload && conv.payload.id) ?? (conv.data && conv.data.id));
+  }
   return { conversationId: cid, contactId: contact.id };
 }
 
