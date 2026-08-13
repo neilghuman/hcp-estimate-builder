@@ -14,6 +14,7 @@ import {
   notifyRecipients, buildNotificationSms,
   ensureCustomer, ensureEstimate, recoverInterruptedIntakes,
   buildCustomerSms, buildConfirmationEmail, runCustomerSms, runCustomerEmail,
+  buildSalesNotificationEmail, runSalesNotification, buildEstimateUrl, buildCustomerUrl,
 } from '../src/intake.js';
 import { unionTags } from '../src/hcp.js';
 import { resolveBrand, brandsStatus } from '../src/brands.js';
@@ -500,6 +501,73 @@ test('resolveBrand honours per-brand env From override', () => {
   process.env.INTAKE_BRAND_ROOFING_EMAIL_FROM = 'estimates@example.com';
   assert.equal(resolveBrand('Roofing').emailFrom, 'estimates@example.com');
   delete process.env.INTAKE_BRAND_ROOFING_EMAIL_FROM;
+});
+
+test('resolveBrand derives sales To + From per brand domain', () => {
+  const r = resolveBrand('Roofing');
+  assert.equal(r.salesEmail, 'sales@washingtonroofing.com');
+  assert.equal(r.salesFrom, 'estimaterequest@washingtonroofing.com');
+  const t = resolveBrand('Tree');
+  assert.equal(t.salesEmail, 'sales@washingtontreeservices.com');
+  assert.equal(t.salesFrom, 'estimaterequest@washingtontreeservices.com');
+});
+
+test('resolveBrand honours env overrides for sales To + From', () => {
+  process.env.INTAKE_BRAND_FIREWOOD_SALES_EMAIL = 'leads@example.com';
+  process.env.INTAKE_BRAND_FIREWOOD_SALES_FROM = 'noreply@example.com';
+  const r = resolveBrand('Firewood');
+  assert.equal(r.salesEmail, 'leads@example.com');
+  assert.equal(r.salesFrom, 'noreply@example.com');
+  delete process.env.INTAKE_BRAND_FIREWOOD_SALES_EMAIL;
+  delete process.env.INTAKE_BRAND_FIREWOOD_SALES_FROM;
+});
+
+test('buildSalesNotificationEmail includes customer details, estimate # and a direct estimate link', () => {
+  const brand = resolveBrand('Landscaping');
+  const row = {
+    first_name: 'Sarah', last_name: 'Kelly', customer_tag: 'Landscaping',
+    phone: '2064581885', email: 'sarah@example.com',
+    address_street: '8101 197th Ave NE', address_city: 'Granite Falls', address_state: 'WA', address_zip: '98252',
+    hcp_estimate_number: '1330', hcp_estimate_option_id: 'est_abc', hcp_customer_id: 'cus_xyz',
+  };
+  const { subject, html, text } = buildSalesNotificationEmail(row, brand);
+  assert.equal(subject, 'New Estimate Request \u2013 Sarah Kelly \u2013 Washington Landscaping');
+  assert.match(text, /Estimate #: #1330/);
+  assert.match(text, /pro\.housecallpro\.com\/app\/estimates\/est_abc/);
+  assert.match(html, /View Estimate in Housecall Pro/);
+  assert.match(html, /pro\.housecallpro\.com\/app\/estimates\/est_abc/);
+  assert.match(html, /Granite Falls, WA 98252/);
+  assert.match(html, /\(206\) 458-1885/);
+  assert.match(html, /pro\.housecallpro\.com\/app\/customers\/cus_xyz/);
+});
+
+test('runSalesNotification short-circuits when already sent (no writes)', async () => {
+  const pool = makePool(() => { throw new Error('pool should not be queried'); });
+  const res = await runSalesNotification(pool, { id: 1, sales_notify_status: 'sent' });
+  assert.deepEqual(res, { status: 'sent', skipped: true });
+  assert.equal(pool.calls.length, 0);
+});
+
+test('runSalesNotification skips when the estimate link is not yet available', async () => {
+  const row = { id: 1, customer_tag: 'Landscaping', hcp_estimate_option_id: null, hcp_estimate_url: null };
+  const pool = makePool(() => ({ rows: [row] }));
+  const prevHost = process.env.INTAKE_SMTP_HOST;
+  process.env.INTAKE_SMTP_HOST = '10.0.0.1'; // configured, so we reach the estimate-link check
+  const res = await runSalesNotification(pool, row);
+  assert.equal(res.status, 'skipped');
+  assert.match(res.error, /estimate link not available/);
+  if (prevHost != null) process.env.INTAKE_SMTP_HOST = prevHost; else delete process.env.INTAKE_SMTP_HOST;
+});
+
+test('runSalesNotification skips when email is not configured', async () => {
+  const row = { id: 1, customer_tag: 'Landscaping', hcp_estimate_option_id: 'est_1' };
+  const pool = makePool(() => ({ rows: [row] }));
+  const prevHost = process.env.INTAKE_SMTP_HOST;
+  delete process.env.INTAKE_SMTP_HOST;
+  const res = await runSalesNotification(pool, row);
+  assert.equal(res.status, 'skipped');
+  assert.match(res.error, /email not configured/);
+  if (prevHost != null) process.env.INTAKE_SMTP_HOST = prevHost;
 });
 
 test('buildCustomerSms greets by first name, names the company, invites photo replies, no time promise', () => {

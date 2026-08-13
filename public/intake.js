@@ -599,6 +599,7 @@ function renderSubmitProgress() {
     ['sms', sms.ready ? `Texting the office (${(sms.recipients || []).join(', ')})` : 'Office SMS — skipped, not configured'],
     ['customer_sms', cc.sms ? 'Texting the customer a confirmation' : 'Customer text — skipped, not configured'],
     ['customer_email', cc.email ? 'Emailing the customer a confirmation' : 'Customer email — skipped, not configured'],
+    ['sales_email', cc.salesEmail ? 'Emailing the sales team the estimate' : 'Sales email — skipped, not configured'],
   ].filter(([, label]) => label);
 
   const box = $('submitPlan');
