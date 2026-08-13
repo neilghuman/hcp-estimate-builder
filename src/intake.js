@@ -35,6 +35,8 @@ export const DRAFT_COLUMNS = [
   'resolved_brand', 'chatwoot_inbox_id', 'chatwoot_contact_id', 'chatwoot_conversation_id',
   'customer_sms_status', 'customer_sms_at', 'customer_sms_error',
   'customer_email_status', 'customer_email_at', 'customer_email_error',
+  // Internal sales-team notification outcome.
+  'sales_notify_status', 'sales_notify_at', 'sales_notify_error',
 ];
 
 export const INTAKE_STATUSES = ['draft', 'submitting', 'completed', 'failed'];
@@ -428,6 +430,12 @@ export function discoveryStepStatus(row = {}) {
 export function buildEstimateUrl(optionId) {
   if (!optionId) return null;
   return `https://pro.housecallpro.com/app/estimates/${encodeURIComponent(optionId)}`;
+}
+
+// Direct HCP customer record deep-link. Pure.
+export function buildCustomerUrl(customerId) {
+  if (!customerId) return null;
+  return `https://pro.housecallpro.com/app/customers/${encodeURIComponent(customerId)}`;
 }
 
 // --- Sprint 6: estimate placeholder + private notes --------------------------
@@ -970,6 +978,120 @@ export async function runCustomerEmail(pool, row) {
   return { status, error };
 }
 
+// --- Internal sales-team notification ----------------------------------------
+// Tells the brand's sales team a new intake is complete and an estimate is ready to work.
+
+function salesAddressLine(row) {
+  const street = [row.address_street, row.address_unit].filter(Boolean).join(' ');
+  const city = [[row.address_city, row.address_state].filter(Boolean).join(', '), row.address_zip].filter(Boolean).join(' ');
+  return [street, city].filter(Boolean).join(', ') || 'Not provided';
+}
+
+// Build the internal "new estimate request" email for the brand's sales inbox. Pure.
+export function buildSalesNotificationEmail(row = {}, brand = null) {
+  const company = (brand && brand.company) || 'our team';
+  const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || '(no name)';
+  const service = row.customer_tag || company;
+  const phone = row.phone ? summaryPhone(row.phone) : 'Not provided';
+  const custEmail = row.email || 'Not provided';
+  const address = salesAddressLine(row);
+  const estimateUrl = row.hcp_estimate_url || buildEstimateUrl(row.hcp_estimate_option_id);
+  const estimateNo = row.hcp_estimate_number ? `#${row.hcp_estimate_number}` : 'Pending';
+  const customerUrl = buildCustomerUrl(row.hcp_customer_id);
+
+  const subject = `New Estimate Request \u2013 ${name} \u2013 ${company}`;
+
+  const text = [
+    'New Customer Intake \u2014 Estimate Ready for Follow-Up',
+    '',
+    'A new customer intake has been completed and the customer is waiting for an estimate.',
+    '',
+    `Customer: ${name}`,
+    `Company / Division: ${company}`,
+    `Service Requested: ${service}`,
+    `Phone: ${phone}`,
+    `Email: ${custEmail}`,
+    `Property Address: ${address}`,
+    `Estimate #: ${estimateNo}`,
+    '',
+    estimateUrl ? `View the estimate in Housecall Pro:\n${estimateUrl}` : 'Estimate link: (not available)',
+    customerUrl ? `\nCustomer record:\n${customerUrl}` : '',
+    '',
+    'Status: Customer intake completed \u2014 estimator follow-up required.',
+    'Action Required: Please review the intake information and contact the customer to complete their estimate.',
+  ].filter((l) => l !== null).join('\n');
+
+  const row2 = (label, value) => `<tr><td style="padding:4px 12px 4px 0;color:#667085;font-size:14px;white-space:nowrap;">${escHtml(label)}</td><td style="padding:4px 0;font-size:14px;color:#1f2933;font-weight:600;">${escHtml(value)}</td></tr>`;
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escHtml(subject)}</title></head>
+<body style="margin:0;padding:0;background:#f4f6f8;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+        <tr><td style="background:#0f2f21;padding:18px 28px;color:#fff;font-size:17px;font-weight:700;">${escHtml(company)} \u2014 New Estimate Request</td></tr>
+        <tr><td style="padding:24px 28px;">
+          <h1 style="margin:0 0 8px;font-size:19px;color:#0f2f21;">Estimate ready for follow-up</h1>
+          <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#344054;">A new customer intake has been completed and the customer is waiting for an estimate.</p>
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 18px;">
+            ${row2('Customer', name)}
+            ${row2('Company / Division', company)}
+            ${row2('Service Requested', service)}
+            ${row2('Phone', phone)}
+            ${row2('Email', custEmail)}
+            ${row2('Property Address', address)}
+            ${row2('Estimate #', estimateNo)}
+          </table>
+          ${estimateUrl ? `<div style="margin:0 0 18px;"><a href="${escHtml(estimateUrl)}" style="display:inline-block;background:#1d7a4d;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:12px 22px;border-radius:8px;">View Estimate in Housecall Pro \u2192</a></div>` : ''}
+          ${customerUrl ? `<p style="margin:0 0 16px;font-size:13px;"><a href="${escHtml(customerUrl)}" style="color:#1d7a4d;">View customer record in Housecall Pro</a></p>` : ''}
+          <div style="margin:16px 0 0;padding:14px 16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;">
+            <p style="margin:0;font-size:14px;color:#9a3412;"><strong>Action required:</strong> Please review the intake information and contact the customer to complete their estimate.</p>
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+
+  return { subject, text, html };
+}
+
+// Email the brand's sales team. Idempotent (skips when already sent) and non-fatal. Requires the
+// HCP estimate deep-link — if it isn't available yet the send is skipped (retryable), never sent
+// without a direct estimate link.
+export async function runSalesNotification(pool, row) {
+  if (row.sales_notify_status === 'sent') return { status: 'sent', skipped: true };
+
+  const brand = resolveBrand(row.customer_tag);
+  const to = brand ? brand.salesEmail : null;
+  const estimateUrl = row.hcp_estimate_url || buildEstimateUrl(row.hcp_estimate_option_id);
+  let status = 'skipped';
+  let error = null;
+
+  if (!brand) error = `no brand configured for tag "${row.customer_tag || ''}"`;
+  else if (!to || !isValidEmail(to)) error = `no sales email configured for ${brand.company}`;
+  else if (!email.emailConfigured()) error = 'email not configured';
+  else if (!estimateUrl) error = 'estimate link not available yet';
+  else {
+    try {
+      const msg = buildSalesNotificationEmail(row, brand);
+      const from = `"${brand.company} Estimate Request" <${brand.salesFrom}>`;
+      await email.sendEmail({ from, to, replyTo: row.email || undefined, subject: msg.subject, html: msg.html, text: msg.text });
+      status = 'sent';
+    } catch (e) {
+      status = 'failed';
+      error = e.message;
+      logIntakeError(row, 'sales_notify', e);
+    }
+  }
+
+  await updateDraft(pool, row.id, {
+    sales_notify_status: status,
+    sales_notify_at: status === 'sent' ? new Date().toISOString() : null,
+    sales_notify_error: error,
+  });
+  return { status, error };
+}
+
 export function registerIntakeRoutes(app, pool) {
   // Guard: when the feature flag is off, the whole API returns 404.
   app.use('/api/intake', (req, res, next) => {
@@ -1284,6 +1406,7 @@ export function registerIntakeRoutes(app, pool) {
             brand: brand ? brand.company : null,
             sms: Boolean(brand && brand.inboxId && chatwoot.chatwootConfigured() && (row.customer_sms_status !== 'sent')),
             email: Boolean(brand && brand.emailFrom && email.emailConfigured() && (row.customer_email_status !== 'sent')),
+            salesEmail: Boolean(brand && brand.salesEmail && email.emailConfigured() && (row.sales_notify_status !== 'sent')),
           };
         })(),
       };
@@ -1325,6 +1448,12 @@ export function registerIntakeRoutes(app, pool) {
 
         const cemail = await runCustomerEmail(pool, row);
         steps.push({ step: 'customer_email', ok: cemail.status !== 'failed', status: cemail.status });
+        row = await getIntake(pool, row.id);
+
+        // Internal sales-team notification (brand sales@ inbox) — non-fatal, idempotent, and only
+        // sent once the direct HCP estimate link is available.
+        const sales = await runSalesNotification(pool, row);
+        steps.push({ step: 'sales_email', ok: sales.status !== 'failed', status: sales.status });
 
         await pool.query(`UPDATE customer_intakes SET status = 'completed', submitted_at = NOW(), error = NULL, updated_at = NOW() WHERE id = $1`, [row.id]);
         res.json({ ok: true, status: 'completed', steps, row: await getIntake(pool, row.id) });
