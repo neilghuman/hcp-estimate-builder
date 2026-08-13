@@ -35,3 +35,29 @@ Submit → network showed `POST .../submit 400`, message text landed in the top 
 
 ## Notes
 - No backend/schema changes; the submit validation itself was already correct.
+
+
+## Follow-up: "will not let me submit" (two-save-button trap)
+
+### Root cause
+The form has TWO separate save buttons: "Save & Continue" (customer) and "Save Discovery"
+(discovery). Discovery answers only persist when "Save Discovery" is clicked. When a user
+filled discovery on screen and hit Submit, the old dirty-guard scrolled them to the CUSTOMER
+"Save & Continue" button — which saves the customer but NOT discovery. Submit then rejected
+with "Answer the required discovery questions" even though every answer was visibly filled,
+creating an inescapable loop. Confirmed by reproducing in the browser and reading back the
+draft row (discovery columns null despite on-screen values).
+
+### Fix
+`submitIntake()` now auto-persists everything on screen before validating: when the form is
+dirty it PATCHes `{ ...collectForm(), ...collectDiscovery() }` in one request, then runs the
+submit dry-run. No more juggling two save buttons — clicking Submit saves customer + discovery
+and shows the plan (or the specific remaining reason) right at the button.
+
+### Verification
+- Reproduced the trap (fill customer + discovery, click Submit with nothing manually saved):
+  before = "Intake incomplete. Answer the required discovery questions"; after the fix the
+  same flow renders the submit plan ("Customer: create-or-reuse ... Confirm & submit").
+- `node --check` clean; dev container rebuilt.
+- `collectForm()` does not include `customer_is_new`, so the merged patch never clobbers the
+  new-vs-existing customer decision.

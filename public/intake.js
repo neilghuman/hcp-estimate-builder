@@ -500,23 +500,21 @@ function highlightSaveButton() {
 
 async function submitIntake() {
   if (!currentId) { showMsg('Start an intake first.', 'error'); return; }
-  
-  // Check if form has unsaved changes
-  if (formDirty) {
-    showMsg('⚠ Please save your changes before submitting the intake.', 'error');
-    renderSubmitNotice('⚠ Please save your changes before submitting the intake.');
-    // Scroll to Save & Continue button
-    $('btnSave').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    // Highlight the button to draw attention
-    highlightSaveButton();
-    // Set keyboard focus for accessibility
-    $('btnSave').focus();
-    return;
-  }
-  
+
   try {
+    // Persist everything on screen first (customer + discovery in one patch) so the user never
+    // has to remember two separate save buttons before submitting.
+    if (formDirty) {
+      setButtonBusy($('btnSubmit'), 'Saving…');
+      await ensureDraft();
+      await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: { ...collectForm(), ...collectDiscovery() } });
+      markFormClean();
+      formDirty = false;
+    }
     setButtonBusy($('btnSubmit'), 'Checking…');
     const res = await api(`/api/intake/drafts/${currentId}/submit`, { method: 'POST', body: { dryRun: true } });
+    refreshStepStatus();
+    refreshDiscoveryStatus();
     renderSubmitPlan(res.plan, res.status);
   } catch (e) {
     const detail = e.reasons ? `${e.message} ${e.reasons.join(' ')}` : e.message;
