@@ -22,14 +22,10 @@ export const DRAFT_COLUMNS = [
   'address_line', 'address_street', 'address_unit', 'address_city', 'address_state', 'address_zip',
   'address_place_id', 'address_notes',
   'customer_tag',
-  // Discovery: universal questions (Sprint 1).
-  'project_description',
-  'timeline', 'buying_priority', 'buying_stage',
-  'getting_estimates', 'other_estimates_status', 'scheduling_preference',
-  'budget',
-  'photos_provided',
-  'contact_method', 'contact_time', 'contact_time_detail',
-  'additional_notes',
+  // Discovery: universal questions (Sprint 1 revised schema).
+  'project_description', 'buying_priority', 'buying_stage',
+  'getting_estimates', 'budget', 'photos_provided',
+  'contact_time', 'additional_notes',
   // Server-managed outcome columns (written by the gated apply/notify actions).
   'hcp_estimate_id', 'hcp_estimate_option_id', 'hcp_estimate_number',
   'hcp_customer_url', 'hcp_estimate_url', 'notify_status', 'notify_error',
@@ -440,19 +436,15 @@ function noteVal(v) {
 
 // Build the formatted Private Notes block for an intake. Pure (date injectable for tests).
 export function buildIntakeNote(row = {}, { now = new Date() } = {}) {
-  const callback = row.callback_time === 'Specific Time' && row.callback_time_detail
-    ? `${row.callback_time} (${row.callback_time_detail})`
-    : row.callback_time;
   return [
     `Customer Intake ${intakeNoteMarker(row)}`,
-    `Best Callback Time: ${noteVal(callback)}`,
-    `Problem: ${noteVal(row.problem)}`,
-    `Desired Timeframe: ${noteVal(row.timeframe)}`,
-    `Receiving Other Bids: ${noteVal(row.getting_other_bids)}`,
-    `Scheduled Us Last: ${noteVal(row.final_estimate_response)}`,
-    `Biggest Decision Factor: ${noteVal(row.decision_factor)}`,
+    `Project & Timeline: ${noteVal(row.project_description)}`,
+    `What Matters Most: ${noteVal(row.buying_priority)}`,
+    `Buying Stage: ${noteVal(row.buying_stage)}`,
+    `Getting Other Estimates: ${noteVal(row.getting_estimates)}`,
     `Budget: ${noteVal(row.budget)}`,
-    `Pictures: ${noteVal(row.pictures)}`,
+    `Has Photos: ${noteVal(row.photos_provided)}`,
+    `Best Contact Time: ${noteVal(row.contact_time)}`,
     `Additional Notes: ${noteVal(row.additional_notes)}`,
     `Created By: ${noteVal(row.created_by)}`,
     `Date: ${now.toISOString()}`,
@@ -468,21 +460,21 @@ export function buildIntakeNote(row = {}, { now = new Date() } = {}) {
 // truth; SUMMARY_QUESTION_TEXT only overrides the few labels that read as form captions rather
 // than as something you would say to a customer.
 const SUMMARY_QUESTION_TEXT = {
-  timeframe: 'How soon are you hoping to have this done?',
-  final_estimate_response: 'Would you schedule us as your final estimate?',
-  decision_factor: 'What matters most to you when choosing a contractor?',
-  budget: 'What budget range do you have in mind?',
-  pictures: 'Will you be sending photos of the project?',
-  callback_time: 'When is the best time for an estimator to reach you?',
-  callback_time_detail: 'What specific time works best?',
+  project_description: 'What is the project and ideal timeline?',
+  buying_priority: 'What matters most when choosing a contractor?',
+  buying_stage: 'Where are they in the decision process?',
+  getting_estimates: 'Are they getting other estimates (and can they share schedules)?',
+  budget: 'What budget range do they have in mind?',
+  photos_provided: 'Will they be sending photos of the project?',
+  contact_time: 'When is the best time to reach them by phone?',
   additional_notes: 'Anything else we should know?',
 };
 
 // Which discovery questions belong under which heading, in the order they should print.
 const SUMMARY_DISCOVERY_SECTIONS = [
-  { title: 'CUSTOMER REQUEST', keys: ['problem', 'timeframe'] },
-  { title: 'COMPETING BIDS & DECISION', keys: ['getting_other_bids', 'final_estimate_response', 'decision_factor', 'budget'] },
-  { title: 'SCHEDULING & FOLLOW-UP', keys: ['callback_time', 'callback_time_detail', 'pictures'] },
+  { title: 'CUSTOMER REQUEST', keys: ['project_description'] },
+  { title: 'DECISION & BUDGET', keys: ['buying_priority', 'buying_stage', 'getting_estimates', 'budget'] },
+  { title: 'SCHEDULING & FOLLOW-UP', keys: ['contact_time', 'photos_provided'] },
   { title: 'ADDITIONAL NOTES', keys: ['additional_notes'] },
 ];
 
@@ -544,11 +536,11 @@ export function buildEstimateSummary(row = {}, { now = new Date() } = {}) {
   for (const section of SUMMARY_DISCOVERY_SECTIONS) {
     const pairs = [];
     for (const key of section.keys) {
-      const q = DISCOVERY_QUESTIONS.find((x) => x.key === key);
+      const q = DISCOVERY_QUESTIONS.find((x) => x.id === key);
       if (!q || q.type === 'info') continue;
       // Conditional questions that were never shown to the customer are not "relevant".
       if (!isQuestionVisible(q, row)) continue;
-      pairs.push(summaryPair(SUMMARY_QUESTION_TEXT[key] || q.label, row[key], { required: Boolean(q.required) }));
+      pairs.push(summaryPair(SUMMARY_QUESTION_TEXT[key] || q.text, row[key], { required: Boolean(q.required) }));
     }
     sections.push(summarySection(section.title, pairs));
   }
@@ -588,10 +580,9 @@ export function buildNotificationSms(row = {}, {  } = {}) {
   // Build the header with customer + service + location
   const header = `${customerName} • ${tag} • ${location}`;
   
-  // Add key summary details (problem, timeframe, budget)
+  // Add key summary details (project, budget)
   const summaryParts = [];
-  if (row.problem) summaryParts.push(`Problem: ${String(row.problem).split('\n')[0]}`); // first line only
-  if (row.timeframe) summaryParts.push(`When: ${row.timeframe}`);
+  if (row.project_description) summaryParts.push(`Project: ${String(row.project_description).split('\n')[0]}`); // first line only
   if (row.budget) summaryParts.push(`Budget: ${row.budget}`);
   const summary = summaryParts.length ? summaryParts.join(' | ') : '';
   
@@ -875,14 +866,14 @@ export function registerIntakeRoutes(app, pool) {
   // --- Sprint 9: reporting foundation (read-only aggregates over intake_report) ----
   app.get('/api/intake/report', async (_req, res) => {
     try {
-      const [byStatus, byFinal, timing] = await Promise.all([
+      const [byStatus, byEstimates, timing] = await Promise.all([
         pool.query('SELECT status, COUNT(*)::int AS n FROM customer_intakes GROUP BY status ORDER BY n DESC'),
-        pool.query("SELECT COALESCE(final_estimate_response, '(n/a)') AS final_estimate_response, COUNT(*)::int AS n FROM customer_intakes WHERE getting_other_bids = 'Yes' GROUP BY 1 ORDER BY n DESC"),
+        pool.query("SELECT COALESCE(getting_estimates, '(n/a)') AS getting_estimates, COUNT(*)::int AS n FROM customer_intakes GROUP BY 1 ORDER BY n DESC"),
         pool.query('SELECT ROUND(AVG(minutes_to_submit)::numeric, 1) AS avg_minutes_to_submit, COUNT(*)::int AS completed FROM intake_report WHERE submitted_at IS NOT NULL'),
       ]);
       res.json({
         byStatus: byStatus.rows,
-        byFinalEstimate: byFinal.rows,
+        byGettingEstimates: byEstimates.rows,
         timing: timing.rows[0] || { avg_minutes_to_submit: null, completed: 0 },
       });
     } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

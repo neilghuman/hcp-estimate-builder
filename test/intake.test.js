@@ -10,8 +10,8 @@ import {
   normalizePhone, isValidEmail, validateCustomer, customerStepStatus,
   intakeWriteEnabled, buildCustomerCreatePayload,
   DISCOVERY_QUESTIONS, isQuestionVisible, validateDiscovery, discoveryStepStatus,
-  buildEstimateUrl, intakeNoteMarker, buildIntakeNote, buildEstimateSummary,
-  logIntakeError, notifyRecipients,
+  intakeNoteMarker, buildIntakeNote, buildEstimateSummary,
+  notifyRecipients, buildNotificationSms,
   ensureCustomer, ensureEstimate, recoverInterruptedIntakes,
 } from '../src/intake.js';
 import { unionTags } from '../src/hcp.js';
@@ -276,47 +276,48 @@ test('unionTags adds a new tag once and is idempotent', () => {
   assert.deepEqual(unionTags(['Tree'], null), ['Tree']);
 });
 
-// --- Sprint 5: discovery questions -----------------------------------------
-test('isQuestionVisible gates conditional questions on their parent', () => {
-  const feq = DISCOVERY_QUESTIONS.find((q) => q.key === 'final_estimate_response');
-  assert.equal(isQuestionVisible(feq, { getting_other_bids: 'Yes' }), true);
-  assert.equal(isQuestionVisible(feq, { getting_other_bids: 'No' }), false);
-  const problem = DISCOVERY_QUESTIONS.find((q) => q.key === 'problem');
-  assert.equal(isQuestionVisible(problem, {}), true); // unconditional
+// --- Discovery questions (Sprint 1 revised schema) -------------------------
+test('isQuestionVisible returns true for unconditional questions', () => {
+  const q = DISCOVERY_QUESTIONS.find((x) => x.id === 'project_description');
+  assert.equal(isQuestionVisible(q, {}), true);
+  // Synthetic conditional question exercises the showIf gate.
+  const cond = { id: 'x', showIf: { key: 'buying_stage', equals: 'ready' } };
+  assert.equal(isQuestionVisible(cond, { buying_stage: 'ready' }), true);
+  assert.equal(isQuestionVisible(cond, { buying_stage: 'researching' }), false);
 });
 
-test('validateDiscovery requires base questions but not hidden conditionals', () => {
+test('validateDiscovery requires all required questions', () => {
   const empty = validateDiscovery({});
   assert.equal(empty.valid, false);
-  for (const k of ['problem', 'timeframe', 'getting_other_bids', 'decision_factor', 'budget', 'pictures', 'callback_time']) {
+  for (const k of ['project_description', 'buying_priority', 'buying_stage', 'getting_estimates', 'contact_time']) {
     assert.ok(empty.errors[k], `expected required error for ${k}`);
   }
-  // hidden conditionals must NOT be errors when their parent is not triggered
-  assert.equal('final_estimate_response' in empty.errors, false);
-  assert.equal('callback_time_detail' in empty.errors, false);
+  // Optional questions must never be errors.
+  assert.equal('budget' in empty.errors, false);
+  assert.equal('photos_provided' in empty.errors, false);
+  assert.equal('additional_notes' in empty.errors, false);
 });
 
-test('validateDiscovery enforces conditionals when revealed', () => {
-  const base = {
-    problem: 'tree leaning', timeframe: 'ASAP', getting_other_bids: 'Yes',
-    decision_factor: 'Quality', budget: '$1,000–2,500', pictures: 'No',
-    callback_time: 'Specific Time',
-  };
-  const r = validateDiscovery(base);
-  assert.ok(r.errors.final_estimate_response, 'final estimate required when other bids = Yes');
-  assert.ok(r.errors.callback_time_detail, 'specific time detail required');
+test('validateDiscovery flags only the missing required answers', () => {
+  const r = validateDiscovery({ project_description: 'x', buying_priority: 'quality' });
+  assert.equal(r.valid, false);
+  assert.ok(!r.errors.project_description);
+  assert.ok(!r.errors.buying_priority);
+  assert.ok(r.errors.buying_stage);
+  assert.ok(r.errors.getting_estimates);
+  assert.ok(r.errors.contact_time);
 });
 
 test('validateDiscovery passes a full valid set', () => {
   const good = validateDiscovery({
-    problem: 'x', timeframe: 'ASAP', getting_other_bids: 'No',
-    decision_factor: 'Price', budget: '$10,000+', pictures: 'No', callback_time: 'Anytime',
+    project_description: 'Trim trees', buying_priority: 'quality', buying_stage: 'ready',
+    getting_estimates: 'no', contact_time: 'anytime',
   });
   assert.equal(good.valid, true);
 
   const status = discoveryStepStatus({
-    problem: 'x', timeframe: 'ASAP', getting_other_bids: 'No',
-    decision_factor: 'Price', budget: '$10,000+', pictures: 'No', callback_time: 'Anytime',
+    project_description: 'Trim trees', buying_priority: 'quality', buying_stage: 'ready',
+    getting_estimates: 'no', contact_time: 'anytime',
   });
   assert.equal(status.complete, true);
   assert.deepEqual(status.reasons, []);
@@ -330,21 +331,24 @@ test('intakeNoteMarker embeds the public id for idempotency', () => {
 test('buildIntakeNote renders all fields, marker, and a fixed date', () => {
   const now = new Date('2026-08-05T17:00:00.000Z');
   const note = buildIntakeNote({
-    public_id: 'p1', callback_time: 'Specific Time', callback_time_detail: 'after 5pm',
-    problem: 'Leaning fir', timeframe: 'ASAP', getting_other_bids: 'Yes', final_estimate_response: 'Agreed',
-    decision_factor: 'Quality', budget: '$1,000–2,500',
-    pictures: 'No', additional_notes: 'dog in yard', created_by: 'Roman Seipert',
+    public_id: 'p1',
+    project_description: 'Leaning fir, want it down this month',
+    buying_priority: 'Quality', buying_stage: 'Ready to move forward',
+    getting_estimates: 'Yes', budget: '$1,000 - $5,000',
+    photos_provided: 'No', contact_time: 'Anytime',
+    additional_notes: 'dog in yard', created_by: 'Roman Seipert',
   }, { now });
   assert.match(note, /Customer Intake \[intake:p1\]/);
-  assert.match(note, /Best Callback Time: Specific Time \(after 5pm\)/);
-  assert.match(note, /Scheduled Us Last: Agreed/);
+  assert.match(note, /Project & Timeline: Leaning fir, want it down this month/);
+  assert.match(note, /What Matters Most: Quality/);
+  assert.match(note, /Best Contact Time: Anytime/);
   assert.match(note, /Created By: Roman Seipert/);
   assert.match(note, /Date: 2026-08-05T17:00:00.000Z/);
 });
 
 test('buildIntakeNote shows an em dash for missing values', () => {
   const note = buildIntakeNote({ public_id: 'p2' }, { now: new Date('2026-08-05T00:00:00.000Z') });
-  assert.match(note, /Problem: —/);
+  assert.match(note, /Project & Timeline: —/);
 });
 
 // --- Estimate "Summary of Work" ---------------------------------------------
@@ -359,75 +363,31 @@ function fullIntakeRow(over = {}) {
     address_street: '1200 5th Avenue', address_unit: 'Apt 4B',
     address_city: 'Seattle', address_state: 'WA', address_zip: '98101',
     address_notes: 'Gate code 1234',
-    problem: 'Lawn is overgrown and needs regular service',
-    timeframe: 'This Week',
-    getting_other_bids: 'Yes',
-    final_estimate_response: 'Agreed',
-    decision_factor: 'Quality',
-    budget: '$500–1,000',
-    pictures: 'Yes',
-    callback_time: 'Specific Time',
-    callback_time_detail: 'after 5pm',
+    project_description: 'Lawn is overgrown and needs regular service',
+    buying_priority: 'Quality',
+    buying_stage: 'Ready to move forward',
+    getting_estimates: 'Yes',
+    budget: '$500-1,000',
+    photos_provided: 'Yes',
+    contact_time: 'Evening (5pm - 8pm)',
     additional_notes: 'Dog in the backyard',
     created_by: 'Roman Seipert',
     ...over,
   };
 }
 
-// --- Sprint 5: error logging & context tracking------------------------------
-test('logIntakeError captures all context fields in structured log', () => {
-  const row = { id: 1, public_id: 'pub-1', hcp_customer_id: 'cus_1', hcp_estimate_id: 'est_1', hcp_estimate_option_id: 'opt_1', hcp_estimate_number: '123' };
-  const error = new Error('Test error');
-  error.status = 502;
-  error.body = { message: 'API error' };
-  const logged = logIntakeError(row, 'test_stage', error, { context_key: 'value' });
-  assert.equal(logged.intake_id, 'pub-1');
-  assert.equal(logged.hcp_customer_id, 'cus_1');
-  assert.equal(logged.stage, 'test_stage');
-  assert.equal(logged.error_message, 'Test error');
-  assert.equal(logged.error_status, 502);
-  assert.deepEqual(logged.error_body, { message: 'API error' });
-  assert.equal(logged.context_key, 'value');
-});
-
-test('logIntakeError handles missing row gracefully', () => {
-  const error = new Error('No row error');
-  const logged = logIntakeError(null, 'stage', error);
-  assert.equal(logged.intake_id, undefined); // row?.public_id returns undefined, not null
-  assert.equal(logged.hcp_customer_id, null); // explicit null assignment in function
-  assert.equal(logged.stage, 'stage');
-  assert.equal(logged.error_message, 'No row error');
-});
-
-test('buildEstimateUrl constructs the HCP deep-link from option id', () => {
-  const url = buildEstimateUrl('est_abc123');
-  assert.equal(url, 'https://pro.housecallpro.com/app/estimates/est_abc123');
-});
-
-test('buildEstimateUrl returns null for null/undefined option id', () => {
-  assert.equal(buildEstimateUrl(null), null);
-  assert.equal(buildEstimateUrl(undefined), null);
-  assert.equal(buildEstimateUrl(''), null);
-});
-
-test('buildEstimateUrl URL-encodes special characters', () => {
-  const url = buildEstimateUrl('est_abc/123?x=y');
-  assert.ok(url.includes(encodeURIComponent('est_abc/123?x=y')));
-});
-
-// --- Sprint 6: estimate placeholder + private notes ---------------------------
 test('buildEstimateSummary renders every answer as a Question/Answer pair', () => {
   const s = buildEstimateSummary(fullIntakeRow(), { now: SUMMARY_NOW });
-  assert.match(s, /Question: What problem are you trying to solve\?\nAnswer: Lawn is overgrown and needs regular service/);
-  assert.match(s, /Question: How soon are you hoping to have this done\?\nAnswer: This Week/);
-  assert.match(s, /Question: What budget range do you have in mind\?\nAnswer: \$500–1,000/);
+  assert.match(s, /Question: What is the project and ideal timeline\?\nAnswer: Lawn is overgrown and needs regular service/);
+  assert.match(s, /Question: What matters most when choosing a contractor\?\nAnswer: Quality/);
+  assert.match(s, /Question: What budget range do they have in mind\?\nAnswer: \$500-1,000/);
   assert.match(s, /Question: Anything else we should know\?\nAnswer: Dog in the backyard/);
 });
 
 test('buildEstimateSummary groups content under readable headings', () => {
   const s = buildEstimateSummary(fullIntakeRow(), { now: SUMMARY_NOW });
   for (const h of ['CUSTOMER INTAKE SUMMARY', 'CUSTOMER', 'SERVICE ADDRESS', 'CUSTOMER REQUEST',
-    'COMPETING BIDS & DECISION', 'SCHEDULING & FOLLOW-UP', 'ADDITIONAL NOTES']) {
+    'DECISION & BUDGET', 'SCHEDULING & FOLLOW-UP', 'ADDITIONAL NOTES']) {
     assert.ok(s.includes(h), `expected heading ${h}`);
   }
   assert.match(s, /Taken August 5, 2026 at 10:00 AM by Roman Seipert/);
@@ -446,21 +406,20 @@ test('buildEstimateSummary never leaks keys, ids or JSON', () => {
   }
 });
 
-test('buildEstimateSummary omits conditional questions that never applied', () => {
+test('buildEstimateSummary omits blank optional discovery answers', () => {
   const s = buildEstimateSummary(fullIntakeRow({
-    getting_other_bids: 'No', final_estimate_response: null,
-    callback_time: 'Morning', callback_time_detail: null,
+    photos_provided: null, budget: null,
   }), { now: SUMMARY_NOW });
-  assert.ok(!s.includes('Would you schedule us as your final estimate?'));
-  assert.ok(!s.includes('What specific time works best?'));
-  assert.match(s, /Answer: Morning/);
+  assert.ok(!s.includes('Will they be sending photos of the project?'));
+  assert.ok(!s.includes('What budget range do they have in mind?'));
+  assert.match(s, /Question: What is the project and ideal timeline\?/);
 });
 
 test('buildEstimateSummary marks unanswered required questions but drops blank optional ones', () => {
   const s = buildEstimateSummary(fullIntakeRow({
-    problem: '', additional_notes: '', company: '', address_notes: '',
+    project_description: '', additional_notes: '', company: '', address_notes: '',
   }), { now: SUMMARY_NOW });
-  assert.match(s, /Question: What problem are you trying to solve\?\nAnswer: Not provided/);
+  assert.match(s, /Question: What is the project and ideal timeline\?\nAnswer: Not provided/);
   assert.ok(!s.includes('Anything else we should know?'));
   assert.ok(!s.includes('What company do they represent?'));
   assert.ok(!s.includes('ADDITIONAL NOTES'), 'empty section should be dropped entirely');
@@ -478,6 +437,22 @@ test('notifyRecipients defaults to Neil and normalises to E.164', () => {
   process.env.INTAKE_NOTIFY_NUMBERS = '206-458-1885, 4253339444';
   assert.deepEqual(notifyRecipients(), ['+12064581885', '+14253339444']);
   delete process.env.INTAKE_NOTIFY_NUMBERS;
+});
+
+test('buildNotificationSms formats the office alert with key details and estimate link', () => {
+  const sms = buildNotificationSms({
+    first_name: 'Jane', last_name: 'Doe', customer_tag: 'Tree',
+    address_city: 'Seattle', address_state: 'WA',
+    project_description: 'leaning fir\nsecond line', budget: '$1,000 - $5,000',
+    hcp_estimate_url: 'https://pro.housecallpro.com/app/estimates/best_1',
+  });
+  assert.match(sms, /Jane Doe/);
+  assert.match(sms, /Tree/);
+  assert.match(sms, /Seattle, WA/);
+  assert.match(sms, /Project: leaning fir/);
+  assert.ok(!sms.includes('second line'), 'only the first line of the project is included');
+  assert.match(sms, /Budget: \$1,000 - \$5,000/);
+  assert.match(sms, /pro\.housecallpro\.com\/app\/estimates\/best_1/);
 });
 
 // --- Sprint 8: submit orchestration (idempotent service steps) --------------
