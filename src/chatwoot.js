@@ -199,12 +199,27 @@ export async function ensureConversationForPhone(phoneNumber, { inboxId, name } 
     sourceId = ci && ci.source_id ? ci.source_id : null;
   }
 
-  // 3) Open a conversation and return its id.
-  const conv = await cwFetch(`/api/v1/accounts/${acc}/conversations`, {
-    method: 'POST',
-    body: { inbox_id: inbox, contact_id: contact.id, source_id: sourceId },
-  });
-  const cid = conv && (conv.id ?? (conv.payload && conv.payload.id) ?? (conv.data && conv.data.id));
+  // 3) Reuse the contact's existing conversation in this inbox if one exists; otherwise open a new
+  //    one. SMS is a single thread per phone number, so posting each outbound message to a brand-new
+  //    conversation would fragment the thread. Matches the inbound Telnyx->Chatwoot relay, which
+  //    threads incoming messages into the most recent conversation for the contact in this inbox.
+  let cid = null;
+  try {
+    const list = await cwFetch(`/api/v1/accounts/${acc}/contacts/${contact.id}/conversations`);
+    const convs = (list && (list.payload || (list.data && list.data.payload))) || [];
+    const existing = convs.find((c) => Number(c.inbox_id) === inbox);
+    cid = existing ? existing.id : null;
+  } catch {
+    // Non-fatal: fall through to creating a new conversation if the lookup fails.
+  }
+
+  if (!cid) {
+    const conv = await cwFetch(`/api/v1/accounts/${acc}/conversations`, {
+      method: 'POST',
+      body: { inbox_id: inbox, contact_id: contact.id, source_id: sourceId },
+    });
+    cid = conv && (conv.id ?? (conv.payload && conv.payload.id) ?? (conv.data && conv.data.id));
+  }
   return { conversationId: cid, contactId: contact.id };
 }
 
