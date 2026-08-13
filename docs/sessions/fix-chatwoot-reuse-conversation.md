@@ -46,3 +46,15 @@ Chatwoot conversation, fragmenting the SMS thread. (The function's own doc comme
 - Deploy: rebuild the dev container (and prod) to pick up the change — not performed (production
   change, left for review/deploy).
 - Existing duplicate conversations in Chatwoot were not merged/cleaned up.
+
+## Follow-up request: reopen resolved conversations on new message (phone only)
+> If the previous conversation was resolved and a new message is added, unresolve it. Phone
+> numbers only — leave Thumbtack alone.
+
+- Added `reopenConversation(conversationId)` (`POST /conversations/{id}/toggle_status`
+  `{status:'open'}`, non-fatal). Inside `ensureConversationForPhone`, when a reused conversation
+  has status `resolved`, it is reopened before the new message is posted. This lives only in the
+  phone/SMS path; Thumbtack is handled by separate n8n workflows and is untouched.
+- Tests: reopen-on-resolved case added; open-conversation case asserts no `toggle_status` call.
+  Suite: 140/140 pass.
+

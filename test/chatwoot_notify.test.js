@@ -59,15 +59,34 @@ test('ensureConversationForPhone reuses the contact\'s existing conversation in 
     // Most-recent-first, mixed inboxes; the resolver must pick the inbox-3 one and not create a new conversation.
     { method: 'GET', path: '/contacts/77/conversations', res: { payload: [
       { id: 950, inbox_id: 9, status: 'open' },
-      { id: 942, inbox_id: 3, status: 'resolved' },
+      { id: 942, inbox_id: 3, status: 'open' },
       { id: 930, inbox_id: 3, status: 'open' },
     ] } },
   ]);
   const res = await ensureConversationForPhone('+12064581885', { inboxId: 3 });
   assert.equal(res.conversationId, 942);
   assert.equal(res.contactId, 77);
-  // no NEW conversation was created
-  assert.equal(calls.some((c) => c.method === 'POST' && c.url.includes('/conversations')), false);
+  // no NEW conversation was created (the create endpoint ends with /conversations)
+  assert.equal(calls.some((c) => c.method === 'POST' && c.url.endsWith('/conversations')), false);
+  // an already-open conversation is not reopened
+  assert.equal(calls.some((c) => c.url.includes('/toggle_status')), false);
+});
+
+test('ensureConversationForPhone reopens a reused conversation that was resolved', async () => {
+  const calls = mockRoutes([
+    { method: 'GET', path: '/contacts/search', res: { payload: [{ id: 77, contact_inboxes: [{ inbox: { id: 3 }, source_id: 'srcX' }] }] } },
+    { method: 'GET', path: '/contacts/77/conversations', res: { payload: [
+      { id: 942, inbox_id: 3, status: 'resolved' },
+    ] } },
+  ]);
+  const res = await ensureConversationForPhone('+12064581885', { inboxId: 3 });
+  assert.equal(res.conversationId, 942);
+  // reused (no new conversation created)
+  assert.equal(calls.some((c) => c.method === 'POST' && c.url.endsWith('/conversations')), false);
+  // reopened via toggle_status on the reused conversation
+  const reopen = calls.find((c) => c.method === 'POST' && c.url.includes('/conversations/942/toggle_status'));
+  assert.ok(reopen, 'expected a toggle_status call on conversation 942');
+  assert.equal(reopen.body.status, 'open');
 });
 
 test('ensureConversationForPhone requires an inbox', async () => {

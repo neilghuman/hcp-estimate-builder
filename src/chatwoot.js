@@ -156,6 +156,21 @@ export async function getConversation(conversationId) {
 // Post an OUTGOING message into a conversation. This is the only Chat Foundry call that causes a
 // customer-facing message (delivered by the existing n8n Telnyx/Thumbtack outbound relays).
 // Returns { id, content } for the created message; the id is stored as the idempotency key.
+// Reopen a resolved/snoozed conversation so a newly-added message is visible to agents.
+// Non-fatal by design: a failure here must never block the actual message send.
+export async function reopenConversation(conversationId) {
+  const acc = requireAccount();
+  try {
+    await cwFetch(`/api/v1/accounts/${acc}/conversations/${Number(conversationId)}/toggle_status`, {
+      method: 'POST',
+      body: { status: 'open' },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function sendMessage(conversationId, content) {
   const acc = requireAccount();
   const text = String(content || '').trim();
@@ -209,6 +224,11 @@ export async function ensureConversationForPhone(phoneNumber, { inboxId, name } 
     const convs = (list && (list.payload || (list.data && list.data.payload))) || [];
     const existing = convs.find((c) => Number(c.inbox_id) === inbox);
     cid = existing ? existing.id : null;
+    // A reused conversation that was resolved should reopen now that we're adding a new message
+    // (phone/SMS threads only — Thumbtack is handled by separate n8n workflows and is untouched).
+    if (existing && existing.status === 'resolved') {
+      await reopenConversation(cid);
+    }
   } catch {
     // Non-fatal: fall through to creating a new conversation if the lookup fails.
   }
