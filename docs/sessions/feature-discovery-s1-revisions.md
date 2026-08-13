@@ -133,3 +133,26 @@ The user provided specific modifications to the original Sprint 1 wireframes:
 - ✅ Backend validation updated
 - ✅ HTML + CSS updated
 - ✅ No syntax errors; builds and deploys cleanly
+
+
+## Follow-up session (2026-08-12) — review + closeout
+
+Additional owner-requested edits and a deeper consistency fix before merge.
+
+### Question changes
+- Removed `service_type` ("What type of work do you need?")
+- Removed `project_success` ("What would make this project successful for you?")
+- Reworded `getting_estimates` to ask about sharing other estimate schedules so we don't double-book
+- `budget` changed from a select to open free-text
+- `photos_provided` reworded to "Do you have any photos of the project?" + helper text explaining the post-call SMS reply flow
+- Net: 8 discovery questions
+
+### Bugs found & fixed during review
+1. Duplicate `discoverySchema` block in `public/intake.js` (old Sprint 5 impl + new impl) caused `SyntaxError: Identifier 'discoverySchema' has already been declared`, which killed the whole script so nothing rendered. Removed the stale block.
+2. Dark-mode labels were invisible: discovery CSS referenced non-existent theme vars (`--bg-secondary`, `--card-border`, `--primary`); switched to the real theme vars (`--surface-soft`, `--border`, `--control-*`, `--title`).
+3. Schema/consumer drift: the discovery schema had been migrated to new field ids, but `buildIntakeNote`, `buildEstimateSummary` (+ its section/label maps), `buildNotificationSms`, and the `/api/intake/report` aggregate still used the OLD field names — so the estimator note/summary rendered blank and the report queried dropped columns. Migrated all consumers to the new ids.
+4. Storage gap: the new field ids had no DB columns (017 created columns for the OLD names), so saving discovery answers threw "column does not exist". Added migration `022_intake_discovery_revised_columns.sql` (project_description, buying_priority, buying_stage, getting_estimates, photos_provided, contact_time) and aligned `DRAFT_COLUMNS` to the revised schema.
+
+### Verification
+- `node --test`: 125/125 pass (updated the 8 stale discovery/note/summary tests + the address-payload test to match current code).
+- Rebuilt dev container; migration 022 auto-applied; verified end-to-end discovery PATCH persists all 8 fields; `/api/intake/report` healthy; form renders 8 fields with no page errors in dark mode.
