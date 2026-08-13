@@ -22,9 +22,14 @@ export const DRAFT_COLUMNS = [
   'address_line', 'address_street', 'address_unit', 'address_city', 'address_state', 'address_zip',
   'address_place_id', 'address_notes',
   'customer_tag',
-  'problem', 'timeframe', 'getting_other_bids', 'final_estimate_response',
-  'decision_factor',
-  'budget', 'pictures', 'callback_time', 'callback_time_detail',
+  // Discovery: universal questions (Sprint 1).
+  'project_description', 'service_type',
+  'timeline', 'buying_priority', 'buying_stage',
+  'getting_estimates', 'other_estimates_status', 'scheduling_preference',
+  'project_success',
+  'budget',
+  'photos_provided',
+  'contact_method', 'contact_time', 'contact_time_detail',
   'additional_notes',
   // Server-managed outcome columns (written by the gated apply/notify actions).
   'hcp_estimate_id', 'hcp_estimate_option_id', 'hcp_estimate_number',
@@ -32,6 +37,128 @@ export const DRAFT_COLUMNS = [
 ];
 
 export const INTAKE_STATUSES = ['draft', 'submitting', 'completed', 'failed'];
+
+// === Sprint 1: Discovery Questions Schema ===
+// Universal questions that apply across all services.
+// Each question: id (key), text, type (textarea/text/select/pills), required, placeholder, options[], showWhen (for S2 conditionals).
+export const DISCOVERY_QUESTIONS = [
+  // Sprint 1 Revised: 9 questions (merged Q1+Q3, removed Q10, reworded Q11)
+  {
+    id: 'project_description',
+    text: 'Tell us about your project and when you\'d like it completed.',
+    type: 'textarea',
+    required: true,
+    placeholder: 'Describe what you need and your ideal timeline...',
+  },
+  {
+    id: 'service_type',
+    text: 'What type of work do you need?',
+    type: 'select',
+    required: false, // Conditional on customer tag; S2 will populate dynamically based on tag
+    placeholder: 'Select service type',
+    options: [
+      // Placeholder options; S2 will make this dynamic per brand/tag
+      { label: 'Landscaping Design', value: 'design' },
+      { label: 'Lawn Care', value: 'lawn-care' },
+      { label: 'Tree Service', value: 'tree-service' },
+      { label: 'Hardscape', value: 'hardscape' },
+      { label: 'Other', value: 'other' },
+    ],
+  },
+  {
+    id: 'buying_priority',
+    text: 'What matters most to you when selecting a contractor?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select what matters most',
+    options: [
+      { label: 'Quality of work', value: 'quality' },
+      { label: 'Price / value for money', value: 'price' },
+      { label: 'Warranty / guarantee', value: 'warranty' },
+      { label: 'Reputation / trusted company', value: 'reputation' },
+      { label: 'Speed / get it done fast', value: 'speed' },
+      { label: 'Not sure', value: 'not-sure' },
+    ],
+  },
+  {
+    id: 'buying_stage',
+    text: 'Where are you in the process of moving forward?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select your stage',
+    options: [
+      { label: 'Ready to move forward', value: 'ready' },
+      { label: 'Comparing different options', value: 'comparing' },
+      { label: 'Planning / setting budget', value: 'planning' },
+      { label: 'Still researching', value: 'researching' },
+    ],
+  },
+  {
+    id: 'getting_estimates',
+    text: 'Are you getting estimates from other companies?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select an option',
+    options: [
+      { label: 'Yes, I\'m comparing estimates', value: 'yes' },
+      { label: 'No, just getting one from you', value: 'no' },
+      { label: 'Planning to get more estimates', value: 'planning' },
+    ],
+  },
+  {
+    id: 'project_success',
+    text: 'What would make this project successful for you?',
+    type: 'textarea',
+    required: false,
+    placeholder: 'Tell us your goals (optional)...',
+  },
+  {
+    id: 'budget',
+    text: 'What\'s your budget range?',
+    type: 'select',
+    required: false,
+    placeholder: 'Select a budget range (optional)',
+    options: [
+      { label: 'No budget in mind yet', value: 'no-budget' },
+      { label: 'Not sure', value: 'not-sure' },
+      { label: 'Under $1,000', value: 'under-1k' },
+      { label: '$1,000 - $5,000', value: '1k-5k' },
+      { label: '$5,000 - $10,000', value: '5k-10k' },
+      { label: '$10,000+', value: '10k-plus' },
+    ],
+  },
+  {
+    id: 'photos_provided',
+    text: 'Do you have photos of the project?',
+    type: 'select',
+    required: false,
+    placeholder: 'Select an option',
+    options: [
+      { label: 'Yes, I have photos', value: 'yes' },
+      { label: 'No, I don\'t have any', value: 'no' },
+    ],
+  },
+  {
+    id: 'contact_time',
+    text: 'What is the best time for us to contact you via telephone?',
+    type: 'select',
+    required: true,
+    placeholder: 'Select preferred time',
+    options: [
+      { label: 'Morning (8am - 12pm)', value: 'morning' },
+      { label: 'Afternoon (12pm - 5pm)', value: 'afternoon' },
+      { label: 'Evening (5pm - 8pm)', value: 'evening' },
+      { label: 'Anytime works', value: 'anytime' },
+    ],
+  },
+  {
+    id: 'additional_notes',
+    text: 'Anything else we should know?',
+    type: 'textarea',
+    required: false,
+    placeholder: 'Additional details, concerns, or questions (optional)...',
+  },
+];
 
 export function intakeEnabled() {
   // Feature flag — default ON. Set INTAKE_ENABLED=false to hide the API (nav is static).
@@ -296,52 +423,25 @@ export const OFFICE_FINAL_ESTIMATE_SCRIPT =
   "information you need to make the best decision for your property. Our goal isn't simply to give " +
   'another estimate — we want to help you make the right decision.';
 
-export const DISCOVERY_QUESTIONS = [
-  { key: 'problem', label: 'What problem are you trying to solve?', type: 'textarea', required: true },
-  { key: 'timeframe', label: 'Desired timeframe', type: 'select', required: true,
-    options: ['ASAP', 'Today', 'This Week', 'Within Two Weeks', 'This Month', 'Next Month', 'Just Gathering Information', 'No Rush'] },
-  { key: 'getting_other_bids', label: 'Are you getting other bids?', type: 'select', required: true,
-    options: ['Yes', 'No', 'Unsure'] },
-  { key: 'final_estimate_response', label: 'Would you schedule us as your final estimate?', type: 'select', required: true,
-    options: ['Agreed', 'Declined', 'Unsure', 'Not Applicable'],
-    showIf: { key: 'getting_other_bids', equals: 'Yes' }, script: OFFICE_FINAL_ESTIMATE_SCRIPT },
-  { key: 'decision_factor', label: 'What is most important when choosing a contractor?', type: 'select', required: true,
-    options: ['Price', 'Quality', 'Timeline', 'Communication', 'Licensing', 'Warranty', 'Reputation', 'Unsure', 'Other'] },
-  { key: 'budget', label: 'Budget', type: 'select', required: true,
-    options: ['Under $500', '$500–1,000', '$1,000–2,500', '$2,500–5,000', '$5,000–10,000', '$10,000+', 'Prefer Not To Say'] },
-  { key: 'pictures', label: 'Would you like to send us any pictures of the project?', type: 'select', required: true,
-    options: ['Yes', 'No'] },
-  { key: 'pictures_info', type: 'info', showIf: { key: 'pictures', equals: 'Yes' },
-    text: 'Ask the customer to text or email photos of the project. (Automated photo uploads can be added here later.)' },
-  { key: 'callback_time', label: 'Best time for an estimator to reach you?', type: 'select', required: true,
-    options: ['Anytime', 'Morning', 'Afternoon', 'Evening', 'Specific Time'] },
-  { key: 'callback_time_detail', label: 'Specific time', type: 'text', required: true,
-    showIf: { key: 'callback_time', equals: 'Specific Time' } },
-  { key: 'additional_notes', label: 'Additional notes', type: 'textarea', required: false,
-    hint: 'e.g. dog in backyard, gate code, works nights, wants estimate emailed, HOA restrictions.' },
-];
-
 // A question is only in play when its showIf condition (if any) is satisfied. Pure.
 export function isQuestionVisible(q, row = {}) {
   if (!q.showIf) return true;
   return String(row[q.showIf.key] ?? '') === q.showIf.equals;
 }
 
-// Validate discovery answers, honouring conditional visibility + required. Pure.
+// Validate discovery answers using new sprint 1 revised schema. Pure.
 export function validateDiscovery(row = {}) {
   const errors = {};
-  for (const q of DISCOVERY_QUESTIONS) {
-    if (q.type === 'info' || !isQuestionVisible(q, row)) continue;
-    const v = row[q.key];
-    if (q.required && (v === null || v === undefined || String(v).trim() === '')) {
-      errors[q.key] = `${q.label} is required.`;
-      continue;
-    }
-    if (q.key === 'companies_visited' && v != null && String(v).trim() !== '') {
-      const n = Number(v);
-      if (!Number.isInteger(n) || n < 0) errors.companies_visited = 'Enter a whole number.';
+  
+  // Check required discovery questions
+  const requiredQuestions = DISCOVERY_QUESTIONS.filter(q => q.required);
+  for (const q of requiredQuestions) {
+    const val = String(row[q.id] || '').trim();
+    if (!val) {
+      errors[q.id] = `${q.text} is required.`;
     }
   }
+  
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
