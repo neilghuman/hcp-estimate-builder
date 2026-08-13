@@ -12,6 +12,8 @@
 
 import { listEmployees, searchCustomers, getCustomer, listTags, createCustomer, ensureCustomerAddress, applyCustomerTag, createEmptyEstimate, appendCustomerNote } from './hcp.js';
 import * as chatwoot from './chatwoot.js';
+import * as email from './email.js';
+import { resolveBrand, brandsStatus } from './brands.js';
 
 // Columns a client may set on a draft. Anything not in this list is ignored (defence in depth:
 // the UPDATE only ever interpolates names from this allowlist, never client-provided keys).
@@ -29,6 +31,10 @@ export const DRAFT_COLUMNS = [
   // Server-managed outcome columns (written by the gated apply/notify actions).
   'hcp_estimate_id', 'hcp_estimate_option_id', 'hcp_estimate_number',
   'hcp_customer_url', 'hcp_estimate_url', 'notify_status', 'notify_error',
+  // Brand-routed customer communications (SMS + email) outcomes.
+  'resolved_brand', 'chatwoot_inbox_id', 'chatwoot_contact_id', 'chatwoot_conversation_id',
+  'customer_sms_status', 'customer_sms_at', 'customer_sms_error',
+  'customer_email_status', 'customer_email_at', 'customer_email_error',
 ];
 
 export const INTAKE_STATUSES = ['draft', 'submitting', 'completed', 'failed'];
@@ -800,6 +806,170 @@ export async function runNotify(pool, row) {
   return { status, results };
 }
 
+// --- Customer communications: branded SMS + confirmation email ---------------
+// Both channels are brand-routed (via src/brands.js), idempotent (skip if already sent), and
+// NON-FATAL: they record their own status and never throw into the submit pipeline, so a comms
+// failure can never lose or duplicate a successfully created intake.
+
+function intakeFirstName(row) {
+  return String(row.first_name || '').trim() || 'there';
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+// Branded customer SMS. Pure. Deliberately makes no promise about a specific contact time.
+export function buildCustomerSms(row = {}, brand = null) {
+  const company = (brand && brand.company) || 'our team';
+  const first = intakeFirstName(row);
+  // One blank line between each paragraph so the text is easy to read on a phone.
+  return [
+    `Hello ${first}, thank you for choosing ${company}! We've received your information and will pass it along to one of our estimators, who will be in touch with you.`,
+    '',
+    "If you have any photos of the project you'd like us to see, simply reply to this text with them.",
+    '',
+    'We look forward to working with you!',
+  ].join('\n');
+}
+
+// Branded confirmation email (subject + responsive HTML + plain-text fallback). Pure.
+export function buildConfirmationEmail(row = {}, brand = null) {
+  const company = (brand && brand.company) || 'our team';
+  const first = intakeFirstName(row);
+  const subject = `We've received your request — ${company}`;
+
+  const text = [
+    `Hi ${first},`,
+    '',
+    `Thank you for contacting ${company}.`,
+    '',
+    'We\'ve received your project information and will pass it along to one of our estimators. Someone from our team will be in touch with you to discuss your project and next steps.',
+    '',
+    'Have photos of the project?',
+    "We've also sent you a text message from our company phone number. If you have any photos that would help us better understand the project, simply reply to that text message and attach the photos. There's no need to email the photos separately.",
+    '',
+    'We appreciate the opportunity to help and look forward to working with you.',
+    '',
+    company,
+  ].join('\n');
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6f8;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2933;">
+        <tr><td style="background:#0f2f21;padding:20px 28px;">
+          <div style="color:#ffffff;font-size:18px;font-weight:700;">${escHtml(company)}</div>
+        </td></tr>
+        <tr><td style="padding:28px;">
+          <h1 style="margin:0 0 14px;font-size:20px;line-height:1.3;color:#0f2f21;">We've received your request</h1>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.6;">Hi ${escHtml(first)},</p>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.6;">Thank you for contacting <strong>${escHtml(company)}</strong>. We've received your project information and will pass it along to one of our estimators. Someone from our team will be in touch with you to discuss your project and next steps.</p>
+          <div style="margin:18px 0;padding:16px 18px;background:#f0f7f3;border-radius:8px;border:1px solid #d6e7de;">
+            <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#0f2f21;">Have photos of the project?</p>
+            <p style="margin:0;font-size:14px;line-height:1.6;">We've also sent you a text message from our company phone number. If you have any photos that would help us better understand the project, simply reply to that text message and attach the photos. There's no need to email the photos separately.</p>
+          </div>
+          <p style="margin:0 0 14px;font-size:15px;line-height:1.6;">We appreciate the opportunity to help and look forward to working with you.</p>
+          <p style="margin:18px 0 0;font-size:15px;font-weight:700;color:#0f2f21;">${escHtml(company)}</p>
+        </td></tr>
+      </table>
+      <p style="max-width:560px;margin:14px auto 0;font-size:12px;color:#9aa8b6;line-height:1.5;">This is a confirmation of your request. If you didn't contact ${escHtml(company)}, you can ignore this email.</p>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  return { subject, text, html };
+}
+
+// Text the customer a branded confirmation from the correct brand's Chatwoot inbox. Idempotent
+// (skips when already sent) and non-fatal. Records the resolved brand + reused/created Chatwoot
+// contact/conversation and the send status/timestamp.
+export async function runCustomerSms(pool, row) {
+  if (row.customer_sms_status === 'sent') return { status: 'sent', skipped: true };
+
+  const brand = resolveBrand(row.customer_tag);
+  const phone = normalizePhone(row.phone).e164 || (row.phone ? String(row.phone).trim() : '');
+  let status = 'skipped';
+  let error = null;
+  let contactId = null;
+  let conversationId = null;
+
+  if (!brand) error = `no brand configured for tag "${row.customer_tag || ''}"`;
+  else if (!brand.inboxId) error = `no Chatwoot inbox configured for ${brand.company}`;
+  else if (!chatwoot.chatwootConfigured()) error = 'chatwoot not configured';
+  else if (!phone) error = 'no customer phone number';
+  else {
+    try {
+      const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || phone;
+      const conv = await chatwoot.ensureConversationForPhone(phone, { inboxId: brand.inboxId, name });
+      conversationId = conv.conversationId;
+      contactId = conv.contactId;
+      await chatwoot.sendMessage(conversationId, buildCustomerSms(row, brand));
+      status = 'sent';
+    } catch (e) {
+      status = 'failed';
+      error = e.message;
+      logIntakeError(row, 'customer_sms', e, { inbox: brand.inboxId });
+    }
+  }
+
+  await updateDraft(pool, row.id, {
+    resolved_brand: brand ? brand.company : null,
+    chatwoot_inbox_id: brand && brand.inboxId ? brand.inboxId : null,
+    chatwoot_contact_id: contactId != null ? String(contactId) : null,
+    chatwoot_conversation_id: conversationId != null ? String(conversationId) : null,
+    customer_sms_status: status,
+    customer_sms_at: status === 'sent' ? new Date().toISOString() : null,
+    customer_sms_error: error,
+  });
+  return { status, error, conversationId, contactId };
+}
+
+// Email the customer a branded confirmation. Idempotent (skips when already sent) and non-fatal.
+export async function runCustomerEmail(pool, row) {
+  if (row.customer_email_status === 'sent') return { status: 'sent', skipped: true };
+
+  const brand = resolveBrand(row.customer_tag);
+  const to = String(row.email || '').trim();
+  let status = 'skipped';
+  let error = null;
+
+  if (!brand) error = `no brand configured for tag "${row.customer_tag || ''}"`;
+  else if (!isValidEmail(to)) error = 'no valid customer email';
+  else if (!email.emailConfigured()) error = 'email not configured';
+  else if (!brand.emailFrom) error = `no From address configured for ${brand.company}`;
+  else {
+    try {
+      const msg = buildConfirmationEmail(row, brand);
+      const from = `"${brand.company}" <${brand.emailFrom}>`;
+      await email.sendEmail({ from, to, replyTo: brand.replyTo, subject: msg.subject, html: msg.html, text: msg.text });
+      status = 'sent';
+    } catch (e) {
+      status = 'failed';
+      error = e.message;
+      logIntakeError(row, 'customer_email', e);
+    }
+  }
+
+  await updateDraft(pool, row.id, {
+    resolved_brand: brand ? brand.company : (row.resolved_brand || null),
+    customer_email_status: status,
+    customer_email_at: status === 'sent' ? new Date().toISOString() : null,
+    customer_email_error: error,
+  });
+  return { status, error };
+}
+
 export function registerIntakeRoutes(app, pool) {
   // Guard: when the feature flag is off, the whole API returns 404.
   app.use('/api/intake', (req, res, next) => {
@@ -815,6 +985,7 @@ export function registerIntakeRoutes(app, pool) {
       version: 1,
       statuses: INTAKE_STATUSES,
       notify: { configured: chatwoot.chatwootConfigured(), inbox: Boolean(notifyInboxId()), recipients: notifyRecipients().length },
+      comms: { chatwoot: chatwoot.chatwootConfigured(), email: email.emailConfigured(), brands: brandsStatus() },
       googleMapsKey: process.env.GOOGLE_MAPS_KEY || '',
     });
   });
@@ -1107,6 +1278,14 @@ export function registerIntakeRoutes(app, pool) {
         estimate: row.hcp_estimate_id ? 'exists' : 'create',
         notes: 'append',
         sms: { recipients: notifyRecipients(), ready: chatwoot.chatwootConfigured() && Boolean(notifyInboxId()) },
+        customerComms: (() => {
+          const brand = resolveBrand(row.customer_tag);
+          return {
+            brand: brand ? brand.company : null,
+            sms: Boolean(brand && brand.inboxId && chatwoot.chatwootConfigured() && (row.customer_sms_status !== 'sent')),
+            email: Boolean(brand && brand.emailFrom && email.emailConfigured() && (row.customer_email_status !== 'sent')),
+          };
+        })(),
       };
       if (dryRun) return res.json({ dryRun: true, writeEnabled: intakeWriteEnabled(), status: row.status, plan });
 
@@ -1137,6 +1316,15 @@ export function registerIntakeRoutes(app, pool) {
         // SMS is non-fatal: a failed notification must not fail a completed intake.
         const s = await runNotify(pool, row);
         steps.push({ step: 'sms', ok: s.status !== 'failed', status: s.status, results: s.results });
+        row = await getIntake(pool, row.id);
+
+        // Branded customer communications — both non-fatal and idempotent (skip if already sent).
+        const csms = await runCustomerSms(pool, row);
+        steps.push({ step: 'customer_sms', ok: csms.status !== 'failed', status: csms.status });
+        row = await getIntake(pool, row.id);
+
+        const cemail = await runCustomerEmail(pool, row);
+        steps.push({ step: 'customer_email', ok: cemail.status !== 'failed', status: cemail.status });
 
         await pool.query(`UPDATE customer_intakes SET status = 'completed', submitted_at = NOW(), error = NULL, updated_at = NOW() WHERE id = $1`, [row.id]);
         res.json({ ok: true, status: 'completed', steps, row: await getIntake(pool, row.id) });

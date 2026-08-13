@@ -590,12 +590,15 @@ function renderSubmitPlan(plan, status) {
 function renderSubmitProgress() {
   const p = lastPlan || {};
   const sms = p.sms || {};
+  const cc = p.customerComms || {};
   const steps = [
     ['customer', p.customer === 'link-existing' ? 'Linking the customer in Housecall Pro' : 'Creating or reusing the customer in Housecall Pro'],
     ['tag', p.tag ? `Applying the ${p.tag} tag` : null],
     ['estimate', p.estimate === 'exists' ? 'Reusing the existing estimate' : 'Creating the estimate'],
     ['notes', 'Saving the intake summary to private notes'],
     ['sms', sms.ready ? `Texting the office (${(sms.recipients || []).join(', ')})` : 'Office SMS — skipped, not configured'],
+    ['customer_sms', cc.sms ? 'Texting the customer a confirmation' : 'Customer text — skipped, not configured'],
+    ['customer_email', cc.email ? 'Emailing the customer a confirmation' : 'Customer email — skipped, not configured'],
   ].filter(([, label]) => label);
 
   const box = $('submitPlan');
