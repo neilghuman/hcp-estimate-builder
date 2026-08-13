@@ -482,8 +482,24 @@ test('brandsStatus reports readiness per brand', () => {
   const s = brandsStatus();
   const land = s.find((b) => b.key === 'landscaping');
   assert.ok(land && land.smsReady === true);
+  assert.ok(land && land.emailReady === true); // brand default sales@ address
   const fire = s.find((b) => b.key === 'firewood');
   assert.ok(fire && fire.smsReady === false);
+});
+
+test('resolveBrand provides per-brand sales@ From addresses', () => {
+  assert.equal(resolveBrand('Landscaping').emailFrom, 'sales@washingtonlandscaping.com');
+  assert.equal(resolveBrand('Tree').emailFrom, 'sales@washingtontreeservices.com');
+  assert.equal(resolveBrand('Roofing').emailFrom, 'sales@washingtonroofing.com');
+  assert.equal(resolveBrand('Construction').emailFrom, 'sales@washingtonconstruction.com');
+  assert.equal(resolveBrand('Pressure Washing').emailFrom, 'sales@washingtonpressurewashing.com');
+  assert.equal(resolveBrand('Firewood').emailFrom, 'sales@washingtonfirewood.com');
+});
+
+test('resolveBrand honours per-brand env From override', () => {
+  process.env.INTAKE_BRAND_ROOFING_EMAIL_FROM = 'estimates@example.com';
+  assert.equal(resolveBrand('Roofing').emailFrom, 'estimates@example.com');
+  delete process.env.INTAKE_BRAND_ROOFING_EMAIL_FROM;
 });
 
 test('buildCustomerSms greets by first name, names the company, invites photo replies, no time promise', () => {

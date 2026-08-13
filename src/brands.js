@@ -16,13 +16,15 @@
 // Global fallbacks: INTAKE_EMAIL_FROM, INTAKE_EMAIL_REPLY_TO.
 
 // tags[] are matched case-insensitively against the intake's customer_tag (handles "Tree"/"Trees").
+// emailFrom is each brand's default confirmation-email sender (sales@<brand-domain>); overridable
+// per deploy via INTAKE_BRAND_<KEY>_EMAIL_FROM or the global INTAKE_EMAIL_FROM.
 const BRANDS = [
-  { key: 'trees',            tags: ['tree', 'trees'],                                          company: 'Washington Tree Services',     inboxId: 13 },
-  { key: 'landscaping',      tags: ['landscaping'],                                            company: 'Washington Landscaping',       inboxId: 7 },
-  { key: 'roofing',          tags: ['roofing'],                                                company: 'Washington Roofing',           inboxId: 14 },
-  { key: 'construction',     tags: ['construction'],                                           company: 'Washington Construction',      inboxId: 17 },
-  { key: 'pressure-washing', tags: ['pressure washing', 'pressure-washing', 'pressurewashing'], company: 'Washington Pressure Washing', inboxId: null },
-  { key: 'firewood',         tags: ['firewood'],                                               company: 'Washington Firewood',          inboxId: null },
+  { key: 'trees',            tags: ['tree', 'trees'],                                          company: 'Washington Tree Services',     inboxId: 13,   emailFrom: 'sales@washingtontreeservices.com' },
+  { key: 'landscaping',      tags: ['landscaping'],                                            company: 'Washington Landscaping',       inboxId: 7,    emailFrom: 'sales@washingtonlandscaping.com' },
+  { key: 'roofing',          tags: ['roofing'],                                                company: 'Washington Roofing',           inboxId: 14,   emailFrom: 'sales@washingtonroofing.com' },
+  { key: 'construction',     tags: ['construction'],                                           company: 'Washington Construction',      inboxId: 17,   emailFrom: 'sales@washingtonconstruction.com' },
+  { key: 'pressure-washing', tags: ['pressure washing', 'pressure-washing', 'pressurewashing'], company: 'Washington Pressure Washing', inboxId: null, emailFrom: 'sales@washingtonpressurewashing.com' },
+  { key: 'firewood',         tags: ['firewood'],                                               company: 'Washington Firewood',          inboxId: null, emailFrom: 'sales@washingtonfirewood.com' },
 ];
 
 function envKey(brandKey) {
@@ -39,7 +41,7 @@ export function resolveBrand(tag) {
 
   const K = envKey(b.key);
   const inboxId = Number(process.env[`INTAKE_BRAND_${K}_INBOX_ID`] || b.inboxId || 0) || null;
-  const emailFrom = process.env[`INTAKE_BRAND_${K}_EMAIL_FROM`] || process.env.INTAKE_EMAIL_FROM || null;
+  const emailFrom = process.env[`INTAKE_BRAND_${K}_EMAIL_FROM`] || b.emailFrom || process.env.INTAKE_EMAIL_FROM || null;
   const replyTo = process.env[`INTAKE_BRAND_${K}_REPLY_TO`] || process.env.INTAKE_EMAIL_REPLY_TO || null;
 
   return { key: b.key, company: b.company, inboxId, emailFrom, replyTo };
