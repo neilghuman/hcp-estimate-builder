@@ -500,29 +500,39 @@ function highlightSaveButton() {
 
 async function submitIntake() {
   if (!currentId) { showMsg('Start an intake first.', 'error'); return; }
-  
-  // Check if form has unsaved changes
-  if (formDirty) {
-    showMsg('⚠ Please save your changes before submitting the intake.', 'error');
-    // Scroll to Save & Continue button
-    $('btnSave').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    // Highlight the button to draw attention
-    highlightSaveButton();
-    // Set keyboard focus for accessibility
-    $('btnSave').focus();
-    return;
-  }
-  
+
   try {
+    // Persist everything on screen first (customer + discovery in one patch) so the user never
+    // has to remember two separate save buttons before submitting.
+    if (formDirty) {
+      setButtonBusy($('btnSubmit'), 'Saving…');
+      await ensureDraft();
+      await api(`/api/intake/drafts/${currentId}`, { method: 'PATCH', body: { ...collectForm(), ...collectDiscovery() } });
+      markFormClean();
+      formDirty = false;
+    }
     setButtonBusy($('btnSubmit'), 'Checking…');
     const res = await api(`/api/intake/drafts/${currentId}/submit`, { method: 'POST', body: { dryRun: true } });
+    refreshStepStatus();
+    refreshDiscoveryStatus();
     renderSubmitPlan(res.plan, res.status);
   } catch (e) {
-    if (e.reasons) showMsg(`${e.message} ${e.reasons.join(' ')}`, 'error');
-    else showMsg(e.message, 'error');
+    const detail = e.reasons ? `${e.message} ${e.reasons.join(' ')}` : e.message;
+    showMsg(detail, 'error');
+    renderSubmitNotice(detail);
   } finally {
     setButtonBusy($('btnSubmit'), null);
   }
+}
+
+// Show a submit problem right at the button (the top-of-page banner is easy to miss when
+// the user is scrolled down at Submit). Rendered into the same panel the plan uses.
+function renderSubmitNotice(text) {
+  const box = $('submitPlan');
+  if (!box) return;
+  box.innerHTML = `<p class="plan-line plan-error">⚠ ${escapeHtml(text)}</p>`;
+  box.hidden = false;
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // Swap a button into a disabled, spinner-labelled state, remembering its original text.
