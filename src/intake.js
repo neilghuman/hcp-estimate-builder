@@ -825,13 +825,11 @@ function escHtml(s) {
 export function buildCustomerSms(row = {}, brand = null) {
   const company = (brand && brand.company) || 'our team';
   const first = intakeFirstName(row);
-  // Blank lines between each paragraph so the text is easy to read on a phone.
+  // One blank line between each paragraph so the text is easy to read on a phone.
   return [
     `Hello ${first}, thank you for choosing ${company}! We've received your information and will pass it along to one of our estimators, who will be in touch with you.`,
     '',
-    '',
     "If you have any photos of the project you'd like us to see, simply reply to this text with them.",
-    '',
     '',
     'We look forward to working with you!',
   ].join('\n');
