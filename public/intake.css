@@ -390,9 +390,9 @@ button.is-busy { opacity: 0.85; cursor: progress; }
   flex-direction: column;
   gap: 0.4rem;
   padding: 0.75rem;
-  border: 1px solid var(--card-border, #ddd);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg-secondary, #fafafa);
+  background: var(--surface-soft);
 }
 
 .discovery-field.dq-invalid {
@@ -403,7 +403,7 @@ button.is-busy { opacity: 0.85; cursor: progress; }
 .discovery-label {
   font-weight: 600;
   font-size: 0.95rem;
-  color: var(--text, #333);
+  color: var(--title);
   margin: 0;
   display: flex;
   align-items: center;
@@ -417,7 +417,7 @@ button.is-busy { opacity: 0.85; cursor: progress; }
 
 .discovery-hint {
   font-size: 0.82rem;
-  color: var(--muted, #888);
+  color: var(--muted);
   margin: 0.1rem 0 0;
   line-height: 1.4;
 }
@@ -432,10 +432,10 @@ button.is-busy { opacity: 0.85; cursor: progress; }
 .discovery-select,
 .discovery-input {
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--card-border, #ccc);
+  border: 1px solid var(--control-border);
   border-radius: 6px;
-  background: var(--bg, #fff);
-  color: inherit;
+  background: var(--control-bg);
+  color: var(--control-text);
   font: inherit;
   font-size: 0.95rem;
   transition: border-color 0.2s ease;

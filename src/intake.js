@@ -23,10 +23,9 @@ export const DRAFT_COLUMNS = [
   'address_place_id', 'address_notes',
   'customer_tag',
   // Discovery: universal questions (Sprint 1).
-  'project_description', 'service_type',
+  'project_description',
   'timeline', 'buying_priority', 'buying_stage',
   'getting_estimates', 'other_estimates_status', 'scheduling_preference',
-  'project_success',
   'budget',
   'photos_provided',
   'contact_method', 'contact_time', 'contact_time_detail',
@@ -49,21 +48,6 @@ export const DISCOVERY_QUESTIONS = [
     type: 'textarea',
     required: true,
     placeholder: 'Describe what you need and your ideal timeline...',
-  },
-  {
-    id: 'service_type',
-    text: 'What type of work do you need?',
-    type: 'select',
-    required: false, // Conditional on customer tag; S2 will populate dynamically based on tag
-    placeholder: 'Select service type',
-    options: [
-      // Placeholder options; S2 will make this dynamic per brand/tag
-      { label: 'Landscaping Design', value: 'design' },
-      { label: 'Lawn Care', value: 'lawn-care' },
-      { label: 'Tree Service', value: 'tree-service' },
-      { label: 'Hardscape', value: 'hardscape' },
-      { label: 'Other', value: 'other' },
-    ],
   },
   {
     id: 'buying_priority',
@@ -95,7 +79,7 @@ export const DISCOVERY_QUESTIONS = [
   },
   {
     id: 'getting_estimates',
-    text: 'Are you getting estimates from other companies?',
+    text: 'Are you getting estimates from other companies? If so, can you share your other estimate schedules so we don\'t book you at the same time?',
     type: 'select',
     required: true,
     placeholder: 'Select an option',
@@ -106,33 +90,19 @@ export const DISCOVERY_QUESTIONS = [
     ],
   },
   {
-    id: 'project_success',
-    text: 'What would make this project successful for you?',
-    type: 'textarea',
-    required: false,
-    placeholder: 'Tell us your goals (optional)...',
-  },
-  {
     id: 'budget',
     text: 'What\'s your budget range?',
-    type: 'select',
+    type: 'text',
     required: false,
-    placeholder: 'Select a budget range (optional)',
-    options: [
-      { label: 'No budget in mind yet', value: 'no-budget' },
-      { label: 'Not sure', value: 'not-sure' },
-      { label: 'Under $1,000', value: 'under-1k' },
-      { label: '$1,000 - $5,000', value: '1k-5k' },
-      { label: '$5,000 - $10,000', value: '5k-10k' },
-      { label: '$10,000+', value: '10k-plus' },
-    ],
+    placeholder: 'e.g. around $5,000, or not sure yet (optional)',
   },
   {
     id: 'photos_provided',
-    text: 'Do you have photos of the project?',
+    text: 'Do you have any photos of the project?',
     type: 'select',
     required: false,
     placeholder: 'Select an option',
+    help_text: 'If so, you\'ll receive a text message after the call that you can simply reply to with any photos you\'d prefer to share.',
     options: [
       { label: 'Yes, I have photos', value: 'yes' },
       { label: 'No, I don\'t have any', value: 'no' },
