@@ -45,3 +45,63 @@ export function resolveMessage(candidates, { categoryKey = null, strategy = 'ran
 export function renderBody(body, vars = {}) {
   return String(body || '').replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m));
 }
+
+// ---- Scheduling & quiet hours ------------------------------------------------
+
+export function computeNextDueAt(t0, offsetMinutes) {
+  return new Date(new Date(t0).getTime() + Number(offsetMinutes) * 60000);
+}
+
+export function buildIdemKey(leadRef, step) {
+  return `${leadRef}:${step}`;
+}
+
+export function parseHHMM(s) {
+  const [h, m] = String(s).split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+// Minutes to add so a send lands inside [start,end) local wall-clock. 0 if already inside.
+export function quietHoursDelayMinutes(curMin, startMin, endMin) {
+  if (curMin >= startMin && curMin < endMin) return 0;
+  if (curMin < startMin) return startMin - curMin;
+  return (1440 - curMin) + startMin; // past the window -> next day's start
+}
+
+export function localMinutesInTz(date, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const h = Number(parts.find((p) => p.type === 'hour')?.value || 0);
+  const m = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+  return h * 60 + m;
+}
+
+// If date is outside permitted contact hours in tz, defer to the next window start.
+export function applyQuietHours(date, { tz = 'America/Los_Angeles', start = '08:00', end = '20:00' } = {}) {
+  const delay = quietHoursDelayMinutes(localMinutesInTz(date, tz), parseHHMM(start), parseHHMM(end));
+  return delay === 0 ? date : new Date(date.getTime() + delay * 60000);
+}
+
+// ---- Stop-condition evaluation (Chatwoot-anchored) ---------------------------
+// conv: { status, labels[], messages[] }. Returns an exit reason string or null (continue).
+// A drip's own outbound send is tagged content_attributes.automation === automationKey and is
+// NOT treated as a human response.
+export function evaluateStop(conv, { pendingLabel = 'A_pending_callback', automationKey = 'drip' } = {}) {
+  if (!conv) return null;
+  if (String(conv.status || '').toLowerCase() === 'resolved') return 'resolved';
+  if (!(conv.labels || []).includes(pendingLabel)) return 'label_removed';
+  const human = (conv.messages || []).some((m) => {
+    const t = m.message_type;
+    const incoming = t === 0 || String(t) === 'incoming';
+    const outgoing = t === 1 || String(t) === 'outgoing';
+    if (incoming) return true;
+    if (outgoing && m.private !== true) {
+      const auto = m.content_attributes && m.content_attributes.automation;
+      return auto !== automationKey; // human/agent reply, not our own drip send
+    }
+    return false;
+  });
+  return human ? 'human_response' : null;
+}
+
