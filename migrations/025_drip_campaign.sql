@@ -51,9 +51,10 @@ CREATE TABLE IF NOT EXISTS drip_message (
   version        INT NOT NULL DEFAULT 1,
   updated_by     TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (step_id, category_key, variant)
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- NULL-safe uniqueness: default (category_key IS NULL) rows must dedup too.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_drip_message ON drip_message (step_id, COALESCE(category_key, ''), variant);
 
 -- Edit history for versioning / revert / who-changed-what.
 CREATE TABLE IF NOT EXISTS drip_message_history (
@@ -176,7 +177,7 @@ JOIN (VALUES
   ('lsa_tree', 5, 'Hi {name}, whenever the timing''s right for your {service}, we''re here. Reply with a good time and we''ll take care of the rest. Reply STOP to opt out.', TRUE),
   ('lsa_tree', 6, 'Hi {name}, we''ll close this out so we''re not filling your inbox. If you''d still like a {service} quote down the road, just reply anytime. Thanks from Washington Tree Services!', FALSE)
 ) AS v(seq_key, step_index, body, optout) ON v.seq_key = s.key AND v.step_index = st.step_index
-ON CONFLICT (step_id, category_key, variant) DO NOTHING;
+ON CONFLICT (step_id, COALESCE(category_key, ''), variant) DO NOTHING;
 
 -- Category override example: stump grinding (tree, step 1) references the service specifically.
 INSERT INTO drip_message (step_id, category_key, variant, body, include_optout)
@@ -186,7 +187,7 @@ SELECT st.id, 'stump_grinding', 'A',
 FROM drip_step st
 JOIN drip_sequence s ON s.id = st.sequence_id
 WHERE s.key = 'lsa_tree' AND st.step_index = 1
-ON CONFLICT (step_id, category_key, variant) DO NOTHING;
+ON CONFLICT (step_id, COALESCE(category_key, ''), variant) DO NOTHING;
 
 -- Canonical taxonomy (from categories seen in Chatwoot history).
 INSERT INTO drip_category_map (category_key, source, raw_value)
