@@ -1,9 +1,15 @@
-/* Follow-up drip dashboard — read-only. Leans on /style.css tokens; only page-specifics here. */
+/* Follow-up drip dashboard — read-only. Uses the portal theme tokens from style.css so it
+   tracks light/dark correctly. Only page-specifics live here. */
+
+:root { --fu-accent: #3538cd; }
+:root[data-theme='dark'] { --fu-accent: #8098f9; }
 
 .followup-main {
-  max-width: 1040px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
 .fu-note .hint { margin: 0; }
@@ -14,63 +20,75 @@
   display: inline-flex; align-items: center; gap: 0.4rem;
   padding: 0.35rem 0.7rem; border-radius: 999px;
   font-size: 0.85rem; font-weight: 600;
-  border: 1px solid var(--border, #d0d5dd);
-  background: var(--surface-2, #f7f8fa);
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
 }
-.fu-chip .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #98a2b3; }
+.fu-chip .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--muted); }
 .fu-chip.on .dot { background: #12b76a; }
 .fu-chip.off .dot { background: #f04438; }
 .fu-chip.warn .dot { background: #f79009; }
 
 /* Stats */
 .fu-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
-.fu-stats-grid h3 { margin: 0 0 0.5rem; font-size: 0.9rem; opacity: 0.8; }
+.fu-stats-grid h3 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--muted); }
 .fu-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .fu-badge {
   display: inline-flex; align-items: baseline; gap: 0.35rem;
   padding: 0.25rem 0.6rem; border-radius: 8px;
-  background: var(--surface-2, #f2f4f7); border: 1px solid var(--border, #e4e7ec);
+  color: var(--text);
+  background: var(--surface-soft); border: 1px solid var(--border);
   font-size: 0.85rem;
 }
-.fu-badge b { font-size: 1rem; }
+.fu-badge b { font-size: 1rem; color: var(--title); }
 
 /* Sequences */
 .fu-sequences { display: flex; flex-direction: column; gap: 1.25rem; }
-.fu-seq { border: 1px solid var(--border, #e4e7ec); border-radius: 12px; overflow: hidden; }
+.fu-seq { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
 .fu-seq-head {
   display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-  padding: 0.75rem 1rem; background: var(--surface-2, #f7f8fa);
-  border-bottom: 1px solid var(--border, #e4e7ec);
+  padding: 0.75rem 1rem; background: var(--surface-soft);
+  border-bottom: 1px solid var(--border);
 }
-.fu-seq-head h3 { margin: 0; font-size: 1rem; }
-.fu-seq-meta { display: flex; flex-wrap: wrap; gap: 0.4rem 0.75rem; font-size: 0.8rem; opacity: 0.85; }
-.fu-pill { padding: 0.15rem 0.5rem; border-radius: 6px; background: var(--surface, #fff); border: 1px solid var(--border, #e4e7ec); font-weight: 600; }
-.fu-pill.on { color: #067647; border-color: #a6f4c5; background: #ecfdf3; }
-.fu-pill.off { color: #b42318; border-color: #fecdca; background: #fef3f2; }
+.fu-seq-head h3 { margin: 0; font-size: 1rem; color: var(--title); }
+.fu-seq-head code { background: var(--code-bg); padding: 0.1rem 0.4rem; border-radius: 5px; }
+.fu-seq-meta { display: flex; flex-wrap: wrap; gap: 0.4rem 0.75rem; font-size: 0.8rem; color: var(--muted); }
+.fu-pill {
+  padding: 0.15rem 0.5rem; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  font-weight: 600; font-size: 0.78rem;
+}
+.fu-pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.fu-pill.off { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
 
 .fu-steps { display: flex; flex-direction: column; }
-.fu-step { padding: 0.85rem 1rem; border-top: 1px solid var(--border, #f0f1f3); }
+.fu-step { padding: 0.85rem 1rem; border-top: 1px solid var(--border-soft); }
 .fu-step:first-child { border-top: none; }
 .fu-step-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem; }
 .fu-step-idx {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 1.8rem; height: 1.8rem; padding: 0 0.4rem; border-radius: 8px;
-  background: var(--accent-soft, #eef2ff); color: var(--accent, #3538cd);
+  background: color-mix(in srgb, var(--fu-accent) 16%, transparent); color: var(--fu-accent);
   font-weight: 700; font-size: 0.85rem;
 }
-.fu-step-when { font-weight: 600; }
-.fu-step-when .fu-t0 { color: var(--accent, #3538cd); }
-.fu-msg { margin: 0.25rem 0 0; padding: 0.5rem 0.7rem; border-radius: 8px; background: var(--surface-2, #f7f8fa); font-size: 0.9rem; white-space: pre-wrap; }
-.fu-msg.cat { border-left: 3px solid var(--accent, #6172f3); }
-.fu-msg-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7; margin-bottom: 0.2rem; }
-.fu-optout { font-size: 0.72rem; color: #067647; margin-left: 0.4rem; }
+.fu-step-when { font-weight: 600; color: var(--text); }
+.fu-step-when .fu-t0 { color: var(--fu-accent); }
+.fu-msg {
+  margin: 0.25rem 0 0; padding: 0.5rem 0.7rem; border-radius: 8px;
+  background: var(--surface-soft); color: var(--text);
+  border: 1px solid var(--border-soft);
+  font-size: 0.9rem; white-space: pre-wrap;
+}
+.fu-msg.cat { border-left: 3px solid var(--fu-accent); }
+.fu-msg-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin-bottom: 0.2rem; }
+.fu-optout { font-size: 0.72rem; color: var(--ok); margin-left: 0.4rem; }
 
 /* Tables */
 .fu-table-wrap { overflow-x: auto; }
-.fu-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-.fu-table th, .fu-table td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border, #eaecf0); }
-.fu-table th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7; }
-.fu-table code { font-size: 0.85rem; }
+.fu-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; color: var(--text); }
+.fu-table th, .fu-table td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); }
+.fu-table th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+.fu-table code { background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 5px; font-size: 0.85rem; }
 
 @media (max-width: 640px) {
   .fu-stats-grid { grid-template-columns: 1fr; }
