@@ -180,3 +180,7 @@
 .fu-step-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
 .fu-step-editor .as-body { flex: 1 1 100%; min-height: 70px; }
 .fu-addstep-host { border-left: 3px dashed var(--fu-accent); padding-left: 0.6rem; }
+
+/* Auto-reply templates */
+.fu-templates { display: flex; flex-direction: column; gap: 1.25rem; }
+.fu-tpl-body { min-height: 160px; }

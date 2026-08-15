@@ -387,6 +387,67 @@ export async function deleteStep(pool, id) {
   return r.rows[0] ? { status: 'deleted', id: r.rows[0].id } : { status: 'not_found' };
 }
 
+// ---- Auto-reply templates (dashboard-editable copy read by n8n) --------------
+
+export async function getTemplates(pool) {
+  const r = await pool.query(
+    'SELECT id, template_key, group_key, sub_key, label, body, version, updated_by, updated_at FROM drip_template ORDER BY group_key, sub_key',
+  );
+  return r.rows;
+}
+
+// Flat { sub_key: body } map for a group — the shape n8n consumes.
+export async function getTemplateGroup(pool, group) {
+  const r = await pool.query('SELECT sub_key, body FROM drip_template WHERE group_key = $1', [group]);
+  const map = {};
+  for (const row of r.rows) map[row.sub_key] = row.body;
+  return map;
+}
+
+// Idempotent seed/populate (used by the one-time populate-from-n8n script). Does NOT overwrite an
+// existing row's body, so later dashboard edits are preserved on re-run.
+export async function upsertTemplate(pool, { templateKey, groupKey, subKey, label, body }) {
+  const r = await pool.query(
+    `INSERT INTO drip_template (template_key, group_key, sub_key, label, body)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (template_key) DO NOTHING
+     RETURNING template_key, (xmax = 0) AS inserted`,
+    [templateKey, groupKey, subKey, label || null, String(body)],
+  );
+  return { status: r.rows[0] ? 'inserted' : 'exists' };
+}
+
+// Versioned body edit: archive current body to history, bump version.
+export async function updateTemplate(pool, key, body, changedBy) {
+  const cur = (await pool.query('SELECT body, version FROM drip_template WHERE template_key = $1', [key])).rows[0];
+  if (!cur) return { status: 'not_found' };
+  const changed = String(body) !== cur.body;
+  if (changed) {
+    await pool.query('INSERT INTO drip_template_history (template_key, body, version, changed_by) VALUES ($1,$2,$3,$4)',
+      [key, cur.body, cur.version, changedBy || 'dashboard']);
+  }
+  const r = await pool.query(
+    `UPDATE drip_template SET body = $2, version = $3, updated_by = $4, updated_at = now()
+     WHERE template_key = $1 RETURNING template_key, group_key, sub_key, label, body, version, updated_by`,
+    [key, String(body), changed ? Number(cur.version) + 1 : cur.version, changedBy || 'dashboard'],
+  );
+  return { status: 'updated', template: r.rows[0], versioned: changed };
+}
+
+export async function getTemplateHistory(pool, key) {
+  const r = await pool.query(
+    'SELECT body, version, changed_by, changed_at FROM drip_template_history WHERE template_key = $1 ORDER BY version DESC',
+    [key],
+  );
+  return r.rows;
+}
+
+export async function revertTemplate(pool, key, version, changedBy) {
+  const h = (await pool.query('SELECT body FROM drip_template_history WHERE template_key = $1 AND version = $2', [key, version])).rows[0];
+  if (!h) return { status: 'version_not_found' };
+  return updateTemplate(pool, key, h.body, changedBy);
+}
+
 // Outcome summary across all enrollments, for the analytics panel.
 export async function dripOutcomes(pool) {
   const r = await pool.query(
