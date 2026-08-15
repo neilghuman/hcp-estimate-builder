@@ -114,6 +114,13 @@
 .fu-msg-actions { margin-top: 0.35rem; display: flex; gap: 0.4rem; }
 .fu-ver { font-size: 0.7rem; color: var(--muted); margin-left: 0.4rem; }
 .fu-cat { font-size: 0.7rem; color: var(--fu-accent); margin-left: 0.4rem; border: 1px solid var(--border-soft); border-radius: 999px; padding: 0 0.4rem; }
+.fu-linkkey { cursor: pointer; }
+button.fu-cat-link { font: inherit; font-size: 0.7rem; background: none; line-height: 1.6; }
+.fu-tax-key { background: none; border: none; padding: 0; cursor: pointer; }
+.fu-tax-key code { color: var(--fu-accent); }
+.fu-tax-key:hover code, .fu-cat-link:hover { text-decoration: underline; }
+.fu-flash, .fu-flash td { animation: fu-flash 1.8s ease; }
+@keyframes fu-flash { 0%, 100% { background-color: transparent; } 25% { background-color: var(--surface-soft); } }
 .fu-tpl-catsel { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; color: var(--muted); }
 .fu-tpl-catsel select { font: inherit; font-size: 0.8rem; padding: 0.15rem 0.3rem; background: var(--control-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
 .fu-tpl-newform { display: flex; flex-direction: column; gap: 0.5rem; }

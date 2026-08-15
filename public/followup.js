@@ -609,8 +609,8 @@ function renderTaxonomy(taxonomy) {
   state.taxonomy = taxonomy || [];
   const canEdit = state.cfg.editEnabled;
   $('taxBody').innerHTML = state.taxonomy.map((t) => `
-    <tr>
-      <td><code>${esc(t.category_key)}</code></td><td>${esc(t.source)}</td><td>${esc(t.raw_value)}</td>
+    <tr data-cat="${esc(t.category_key)}">
+      <td><button type="button" class="fu-linkkey fu-tax-key" data-cat="${esc(t.category_key)}" title="Jump to templates using this category"><code>${esc(t.category_key)}</code></button></td><td>${esc(t.source)}</td><td>${esc(t.raw_value)}</td>
       <td>${canEdit ? `<button class="fu-btn danger fu-tax-del" data-tax="${esc(t.id)}" title="Delete">✕</button>` : ''}</td>
     </tr>`).join('');
 
@@ -628,7 +628,29 @@ function renderTaxonomy(taxonomy) {
 $('taxBody').addEventListener('click', (e) => {
   const del = e.target.closest('.fu-tax-del');
   if (del) return deleteTaxonomy(del.dataset.tax);
+  const key = e.target.closest('.fu-tax-key');
+  if (key) return revealTemplatesForCategory(key.dataset.cat);
 });
+
+// Flash + scroll a set of elements into view (used by the category jump-links).
+function revealElements(els) {
+  const list = els.filter(Boolean);
+  if (!list.length) return false;
+  list[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  list.forEach((el) => { el.classList.add('fu-flash'); setTimeout(() => el.classList.remove('fu-flash'), 1800); });
+  return true;
+}
+
+function revealTaxonomyForCategory(cat) {
+  const rows = [...document.querySelectorAll('#taxBody tr')].filter((tr) => tr.dataset.cat === cat);
+  if (!revealElements(rows)) showMsg(`No taxonomy mapping for “${cat}” yet — add one under Category taxonomy.`, 'success');
+}
+
+function revealTemplatesForCategory(cat) {
+  const nodes = (state.templates || []).filter((t) => t.category_key === cat)
+    .map((t) => document.querySelector(`[data-tpl="${window.CSS ? CSS.escape(t.template_key) : t.template_key}"]`));
+  if (!revealElements(nodes)) showMsg(`No template is linked to “${cat}” yet.`, 'success');
+}
 
 async function addTaxonomy() {
   const categoryKey = $('taxKey').value;
@@ -725,7 +747,7 @@ function renderTemplates(list) {
     const rows = groups[g].map((t) => {
       const seg = smsSegments(t.body);
       const ver = t.version ? `<span class="fu-ver">v${esc(t.version)}</span>` : '';
-      const cat = t.category_key ? ` <span class="fu-cat" title="Auto-reply is chosen when a lead resolves to this category">🏷️ ${esc(t.category_key)}</span>` : '';
+      const cat = t.category_key ? ` <button type="button" class="fu-cat fu-linkkey fu-cat-link" data-cat="${esc(t.category_key)}" title="Jump to its taxonomy mapping">🏷️ ${esc(t.category_key)}</button>` : '';
       const actions = canEdit ? `
         <div class="fu-msg-actions">
           <button class="fu-btn fu-tpl-edit" data-key="${esc(t.template_key)}">✎ Edit</button>
@@ -862,6 +884,7 @@ $('templates').addEventListener('click', (e) => {
   if ((el = t('.fu-tpl-save'))) return saveTemplate(el.dataset.key, el.closest('[data-tpl]'));
   if ((el = t('.fu-tpl-revert'))) return revertTemplateUI(el.dataset.key, el.dataset.version);
   if ((el = t('.fu-tpl-del'))) return deleteTemplateUI(el.dataset.key);
+  if ((el = t('.fu-cat-link'))) return revealTaxonomyForCategory(el.dataset.cat);
   if (t('.fu-tpl-create')) return createTemplateUI(document.querySelector('.fu-tpl-newform'));
   if (t('.fu-tpl-cancel')) return renderTemplates(state.templates);
 });
