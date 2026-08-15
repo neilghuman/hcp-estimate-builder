@@ -5,7 +5,7 @@ import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, get
   addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence,
   revertMessage, getSuppressions, removeSuppression, createSequence, addStep, deleteStep,
   getTemplates, getTemplateGroup, updateTemplate, getTemplateHistory, revertTemplate, resolveAutoreply,
-  createTemplate, setTemplateCategory, deleteTemplate } from './drip_runtime.js';
+  createTemplate, setTemplateCategory, setTemplateActive, deleteTemplate } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
 import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings,
   validateSequenceCreate, validateTemplateBody, validateTemplateCreate } from './drip.js';
@@ -229,6 +229,14 @@ export function registerDripRoutes(app, pool) {
   app.put('/api/drip/template/:key/category', requireEdit, async (req, res) => {
     try {
       const out = await setTemplateCategory(pool, req.params.key, req.body?.categoryKey);
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put('/api/drip/template/:key/active', requireEdit, async (req, res) => {
+    try {
+      const out = await setTemplateActive(pool, req.params.key, req.body?.isActive);
       if (out.status === 'not_found') return res.status(404).json(out);
       res.json(out);
     } catch (e) { res.status(500).json({ error: e.message }); }

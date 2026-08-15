@@ -294,7 +294,7 @@ export function validateTemplateBody(body) {
 }
 
 // New auto-reply template: group + sub key form the template_key; category link is optional.
-export function validateTemplateCreate({ group, sub, label, body, categoryKey } = {}) {
+export function validateTemplateCreate({ group, sub, label, body, categoryKey, isActive } = {}) {
   const g = String(group || '').trim().toLowerCase();
   const s = String(sub || '').trim().toLowerCase();
   if (!/^[a-z0-9_]+$/.test(g)) return { ok: false, error: 'Group key may only contain lowercase letters, numbers, and underscores.' };
@@ -302,7 +302,7 @@ export function validateTemplateCreate({ group, sub, label, body, categoryKey } 
   if (!String(body || '').trim()) return { ok: false, error: 'Template body cannot be empty.' };
   return {
     ok: true,
-    value: { groupKey: g, subKey: s, label: String(label || '').trim() || null, body: String(body), categoryKey: String(categoryKey || '').trim() || null },
+    value: { groupKey: g, subKey: s, label: String(label || '').trim() || null, body: String(body), categoryKey: String(categoryKey || '').trim() || null, isActive: isActive !== false },
   };
 }
 

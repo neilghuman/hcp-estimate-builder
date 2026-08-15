@@ -311,7 +311,8 @@ test('autoreplySource: maps group prefix to lead source', () => {
 test('validateTemplateCreate: normalizes keys and requires body', () => {
   const ok = validateTemplateCreate({ group: 'Autoreply_TT_Tree', sub: 'Tree_Removal', label: ' Tree removal ', body: 'Hi 🌳', categoryKey: ' tree_removal ' });
   assert.equal(ok.ok, true);
-  assert.deepEqual(ok.value, { groupKey: 'autoreply_tt_tree', subKey: 'tree_removal', label: 'Tree removal', body: 'Hi 🌳', categoryKey: 'tree_removal' });
+  assert.deepEqual(ok.value, { groupKey: 'autoreply_tt_tree', subKey: 'tree_removal', label: 'Tree removal', body: 'Hi 🌳', categoryKey: 'tree_removal', isActive: true });
+  assert.equal(validateTemplateCreate({ group: 'g', sub: 's', body: 'x', isActive: false }).value.isActive, false); // draft
   assert.equal(validateTemplateCreate({ group: 'g', sub: 's', body: '  ' }).ok, false); // empty body
   assert.equal(validateTemplateCreate({ group: 'bad group', sub: 's', body: 'x' }).ok, false); // space in group
   assert.equal(validateTemplateCreate({ group: 'g', sub: '', body: 'x' }).ok, false); // empty sub
