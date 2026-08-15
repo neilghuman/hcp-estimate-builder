@@ -664,7 +664,7 @@ function renderTaxonomy(taxonomy) {
     const readOnly = PAGE.mode === 'source' && t.source === 'any';
     return `
     <tr data-cat="${esc(t.category_key)}">
-      <td><button type="button" class="fu-linkkey fu-tax-key" data-cat="${esc(t.category_key)}" title="Jump to templates using this category"><code>${esc(t.category_key)}</code></button></td><td>${esc(t.source)}</td><td>${esc(t.raw_value)}</td>
+      <td><button type="button" class="fu-linkkey fu-tax-key" data-cat="${esc(t.category_key)}" data-source="${esc(t.source)}" title="Go to where this category is used"><code>${esc(t.category_key)}</code></button></td><td>${esc(t.source)}</td><td>${esc(t.raw_value)}</td>
       <td>${canEdit && !readOnly ? `<button class="fu-btn danger fu-tax-del" data-tax="${esc(t.id)}" title="Delete">✕</button>` : ''}</td>
     </tr>`;
   }).join('');
@@ -685,7 +685,8 @@ $('taxBody')?.addEventListener('click', (e) => {
   const del = e.target.closest('.fu-tax-del');
   if (del) return deleteTaxonomy(del.dataset.tax);
   const key = e.target.closest('.fu-tax-key');
-  if (key) return revealTemplatesForCategory(key.dataset.cat);
+  // On a source page, jump to the template in place; elsewhere, open the right source page.
+  if (key) return PAGE.mode === 'source' ? revealTemplatesForCategory(key.dataset.cat) : gotoCategory(key.dataset.cat, key.dataset.source);
 });
 
 // Flash + scroll a set of elements into view (used by the category jump-links).
@@ -706,6 +707,22 @@ function revealTemplatesForCategory(cat) {
   const nodes = (state.templates || []).filter((t) => t.category_key === cat)
     .map((t) => document.querySelector(`[data-tpl="${window.CSS ? CSS.escape(t.template_key) : t.template_key}"]`));
   if (!revealElements(nodes)) showMsg(`No template is linked to “${cat}” yet.`, 'success');
+}
+
+// From overview/global, open the source page for a category and jump to it there (via #cat= hash).
+function gotoCategory(cat, src) {
+  const s = SOURCES.find((x) => x.key === src);
+  if (!s) { showMsg(`“${cat}” is shared across sources — open a specific source page to manage its copy.`, 'success'); return; }
+  window.location.href = `${s.href}#cat=${encodeURIComponent(cat)}`;
+}
+
+// On a source page, honor a #cat=<key> hash by scrolling to that category's template (or its row).
+function revealFromHash() {
+  const m = /[#&]cat=([^&]+)/.exec(location.hash || '');
+  if (!m) return;
+  const cat = decodeURIComponent(m[1]);
+  if ((state.templates || []).some((t) => t.category_key === cat)) revealTemplatesForCategory(cat);
+  else revealTaxonomyForCategory(cat);
 }
 
 async function addTaxonomy() {
@@ -1006,6 +1023,7 @@ async function load() {
     if (has('templates')) renderTemplates((await api('/api/drip/templates')).templates);
     if (has('activeBody')) renderActive(active.enrollments || []);
     if (has('supBody')) renderSuppressions((await api('/api/drip/suppressions')).suppressions);
+    if (PAGE.mode === 'source') revealFromHash();
   } catch (e) {
     showMsg(e.message);
   }
