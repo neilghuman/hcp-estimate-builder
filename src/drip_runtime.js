@@ -392,14 +392,14 @@ export async function deleteStep(pool, id) {
 
 export async function getTemplates(pool) {
   const r = await pool.query(
-    'SELECT id, template_key, group_key, sub_key, category_key, label, body, version, updated_by, updated_at FROM drip_template ORDER BY group_key, sub_key',
+    'SELECT id, template_key, group_key, sub_key, category_key, label, body, is_active, version, updated_by, updated_at FROM drip_template ORDER BY group_key, sub_key',
   );
   return r.rows;
 }
 
-// Flat { sub_key: body } map for a group — the shape n8n consumes.
+// Flat { sub_key: body } map for a group — the shape n8n consumes. Drafts are excluded.
 export async function getTemplateGroup(pool, group) {
-  const r = await pool.query('SELECT sub_key, body FROM drip_template WHERE group_key = $1', [group]);
+  const r = await pool.query('SELECT sub_key, body FROM drip_template WHERE group_key = $1 AND is_active = true', [group]);
   const map = {};
   for (const row of r.rows) map[row.sub_key] = row.body;
   return map;
@@ -414,7 +414,7 @@ export async function resolveAutoreply(pool, group, rawCategory) {
     : { rows: [] };
   const categoryKey = resolveCategoryKey(mapRes.rows, source, rawCategory);
   const rowsRes = await pool.query(
-    'SELECT sub_key, category_key, label, body FROM drip_template WHERE group_key = $1',
+    'SELECT sub_key, category_key, label, body FROM drip_template WHERE group_key = $1 AND is_active = true',
     [group],
   );
   const { row, matched } = pickAutoreplyTemplate(rowsRes.rows, categoryKey);
@@ -430,14 +430,14 @@ export async function resolveAutoreply(pool, group, rawCategory) {
 }
 
 // Create a new template. group + sub form template_key; category link is optional.
-export async function createTemplate(pool, { groupKey, subKey, label, body, categoryKey }) {
+export async function createTemplate(pool, { groupKey, subKey, label, body, categoryKey, isActive = true }) {
   const key = `${groupKey}.${subKey}`;
   const r = await pool.query(
-    `INSERT INTO drip_template (template_key, group_key, sub_key, category_key, label, body)
-     VALUES ($1,$2,$3,$4,$5,$6)
+    `INSERT INTO drip_template (template_key, group_key, sub_key, category_key, label, body, is_active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (template_key) DO NOTHING
-     RETURNING id, template_key, group_key, sub_key, category_key, label, body, version`,
-    [key, groupKey, subKey, categoryKey || null, label || null, String(body)],
+     RETURNING id, template_key, group_key, sub_key, category_key, label, body, is_active, version`,
+    [key, groupKey, subKey, categoryKey || null, label || null, String(body), isActive !== false],
   );
   return r.rows[0] ? { status: 'created', template: r.rows[0] } : { status: 'exists' };
 }
@@ -445,8 +445,17 @@ export async function createTemplate(pool, { groupKey, subKey, label, body, cate
 // Link / re-link / unlink (categoryKey null) a template to a category taxonomy key.
 export async function setTemplateCategory(pool, key, categoryKey) {
   const r = await pool.query(
-    'UPDATE drip_template SET category_key = $2, updated_at = now() WHERE template_key = $1 RETURNING template_key, group_key, sub_key, category_key, label, body, version',
+    'UPDATE drip_template SET category_key = $2, updated_at = now() WHERE template_key = $1 RETURNING template_key, group_key, sub_key, category_key, label, body, is_active, version',
     [key, categoryKey || null],
+  );
+  return r.rows[0] ? { status: 'updated', template: r.rows[0] } : { status: 'not_found' };
+}
+
+// Activate (sendable) or deactivate (draft) a template.
+export async function setTemplateActive(pool, key, isActive) {
+  const r = await pool.query(
+    'UPDATE drip_template SET is_active = $2, updated_at = now() WHERE template_key = $1 RETURNING template_key, group_key, sub_key, category_key, label, body, is_active, version',
+    [key, Boolean(isActive)],
   );
   return r.rows[0] ? { status: 'updated', template: r.rows[0] } : { status: 'not_found' };
 }

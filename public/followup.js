@@ -748,16 +748,18 @@ function renderTemplates(list) {
       const seg = smsSegments(t.body);
       const ver = t.version ? `<span class="fu-ver">v${esc(t.version)}</span>` : '';
       const cat = t.category_key ? ` <button type="button" class="fu-cat fu-linkkey fu-cat-link" data-cat="${esc(t.category_key)}" title="Jump to its taxonomy mapping">🏷️ ${esc(t.category_key)}</button>` : '';
+      const draft = t.is_active === false ? ' <span class="fu-draft" title="Draft — not sent until activated">draft</span>' : '';
       const actions = canEdit ? `
         <div class="fu-msg-actions">
           <button class="fu-btn fu-tpl-edit" data-key="${esc(t.template_key)}">✎ Edit</button>
           ${Number(t.version) > 1 ? `<button class="fu-btn fu-tpl-versions" data-key="${esc(t.template_key)}">🕘 Versions</button>` : ''}
           <label class="fu-tpl-catsel" title="Link this template to a category taxonomy">🏷️ <select class="fu-tpl-cat" data-key="${esc(t.template_key)}">${categoryKeyOptions(t.category_key || '')}</select></label>
+          <button class="fu-btn ${t.is_active === false ? 'ok' : ''} fu-tpl-active" data-key="${esc(t.template_key)}" data-active="${t.is_active === false ? 'false' : 'true'}">${t.is_active === false ? '▶ Activate' : '⏸ Deactivate'}</button>
           <button class="fu-btn danger fu-tpl-del" data-key="${esc(t.template_key)}">🗑 Delete</button>
         </div>` : '';
       return `
-        <div class="fu-msg" data-tpl="${esc(t.template_key)}">
-          <div class="fu-msg-label">${esc(t.label || t.sub_key)} <code>${esc(t.sub_key)}</code>${cat}${ver} <span class="fu-ver">${seg.segments} seg</span></div>
+        <div class="fu-msg${t.is_active === false ? ' fu-msg-draft' : ''}" data-tpl="${esc(t.template_key)}">
+          <div class="fu-msg-label">${esc(t.label || t.sub_key)} <code>${esc(t.sub_key)}</code>${cat}${draft}${ver} <span class="fu-ver">${seg.segments} seg</span></div>
           <div class="fu-msg-text">${esc(t.body)}</div>
           ${actions}
         </div>`;
@@ -852,6 +854,15 @@ async function setTemplateCategoryUI(key, categoryKey) {
   } catch (e) { showMsg(e.message); renderTemplates(state.templates); }
 }
 
+async function setTemplateActiveUI(key, active) {
+  try {
+    const out = await api(`/api/drip/template/${encodeURIComponent(key)}/active`, { method: 'PUT', body: { isActive: active } });
+    const t = findTemplate(key); if (t) t.is_active = out.template.is_active;
+    renderTemplates(state.templates);
+    showMsg(active ? 'Activated — this template can now be sent.' : 'Deactivated — saved as a draft (won’t be sent).', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
 async function deleteTemplateUI(key) {
   if (!window.confirm(`Delete template “${key}”? This cannot be undone.`)) return;
   try {
@@ -884,6 +895,7 @@ $('templates').addEventListener('click', (e) => {
   if ((el = t('.fu-tpl-save'))) return saveTemplate(el.dataset.key, el.closest('[data-tpl]'));
   if ((el = t('.fu-tpl-revert'))) return revertTemplateUI(el.dataset.key, el.dataset.version);
   if ((el = t('.fu-tpl-del'))) return deleteTemplateUI(el.dataset.key);
+  if ((el = t('.fu-tpl-active'))) return setTemplateActiveUI(el.dataset.key, el.dataset.active !== 'true');
   if ((el = t('.fu-cat-link'))) return revealTaxonomyForCategory(el.dataset.cat);
   if (t('.fu-tpl-create')) return createTemplateUI(document.querySelector('.fu-tpl-newform'));
   if (t('.fu-tpl-cancel')) return renderTemplates(state.templates);
