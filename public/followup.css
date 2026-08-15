@@ -114,6 +114,12 @@
 .fu-msg-actions { margin-top: 0.35rem; display: flex; gap: 0.4rem; }
 .fu-ver { font-size: 0.7rem; color: var(--muted); margin-left: 0.4rem; }
 .fu-cat { font-size: 0.7rem; color: var(--fu-accent); margin-left: 0.4rem; border: 1px solid var(--border-soft); border-radius: 999px; padding: 0 0.4rem; }
+.fu-tpl-catsel { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; color: var(--muted); }
+.fu-tpl-catsel select { font: inherit; font-size: 0.8rem; padding: 0.15rem 0.3rem; background: var(--control-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.fu-tpl-newform { display: flex; flex-direction: column; gap: 0.5rem; }
+.fu-tpl-newrow { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.fu-tpl-newrow input { font: inherit; padding: 0.3rem 0.4rem; background: var(--control-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.fu-nt-body { width: 100%; min-height: 90px; resize: vertical; font: inherit; font-size: 0.9rem; padding: 0.4rem; background: var(--control-bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
 
 .fu-editor { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.5rem; }
 .fu-ed-body {

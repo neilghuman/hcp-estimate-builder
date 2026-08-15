@@ -4,10 +4,11 @@ import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, get
   updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused,
   addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence,
   revertMessage, getSuppressions, removeSuppression, createSequence, addStep, deleteStep,
-  getTemplates, getTemplateGroup, updateTemplate, getTemplateHistory, revertTemplate, resolveAutoreply } from './drip_runtime.js';
+  getTemplates, getTemplateGroup, updateTemplate, getTemplateHistory, revertTemplate, resolveAutoreply,
+  createTemplate, setTemplateCategory, deleteTemplate } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
 import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings,
-  validateSequenceCreate, validateTemplateBody } from './drip.js';
+  validateSequenceCreate, validateTemplateBody, validateTemplateCreate } from './drip.js';
 import * as cw from './chatwoot.js';
 
 export function registerDripRoutes(app, pool) {
@@ -213,6 +214,32 @@ export function registerDripRoutes(app, pool) {
   app.get('/api/drip/template/:key/history', async (req, res) => {
     try { res.json({ history: await getTemplateHistory(pool, req.params.key) }); }
     catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/drip/template', requireEdit, async (req, res) => {
+    const v = validateTemplateCreate(req.body || {});
+    if (!v.ok) return res.status(422).json({ error: v.error });
+    try {
+      const out = await createTemplate(pool, v.value);
+      if (out.status === 'exists') return res.status(409).json({ error: 'A template with that group and sub key already exists.' });
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put('/api/drip/template/:key/category', requireEdit, async (req, res) => {
+    try {
+      const out = await setTemplateCategory(pool, req.params.key, req.body?.categoryKey);
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/drip/template/:key', requireEdit, async (req, res) => {
+    try {
+      const out = await deleteTemplate(pool, req.params.key);
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   app.put('/api/drip/template/:key', requireEdit, async (req, res) => {

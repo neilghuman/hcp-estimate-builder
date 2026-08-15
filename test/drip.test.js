@@ -6,6 +6,7 @@ import {
   computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
   smsSegments, validateMessage, validateCategoryMap, validateVariant, validateSequenceSettings, validateSequenceCreate,
   validateTemplateBody,
+  validateTemplateCreate,
   autoreplySource,
   pickAutoreplyTemplate,
 } from '../src/drip.js';
@@ -305,6 +306,16 @@ test('autoreplySource: maps group prefix to lead source', () => {
   assert.equal(autoreplySource('autoreply_tt_landscaping'), 'thumbtack');
   assert.equal(autoreplySource('autoreply_lsa_landscaping'), 'google_lsa');
   assert.equal(autoreplySource('something_else'), null);
+});
+
+test('validateTemplateCreate: normalizes keys and requires body', () => {
+  const ok = validateTemplateCreate({ group: 'Autoreply_TT_Tree', sub: 'Tree_Removal', label: ' Tree removal ', body: 'Hi 🌳', categoryKey: ' tree_removal ' });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.value, { groupKey: 'autoreply_tt_tree', subKey: 'tree_removal', label: 'Tree removal', body: 'Hi 🌳', categoryKey: 'tree_removal' });
+  assert.equal(validateTemplateCreate({ group: 'g', sub: 's', body: '  ' }).ok, false); // empty body
+  assert.equal(validateTemplateCreate({ group: 'bad group', sub: 's', body: 'x' }).ok, false); // space in group
+  assert.equal(validateTemplateCreate({ group: 'g', sub: '', body: 'x' }).ok, false); // empty sub
+  assert.equal(validateTemplateCreate({ group: 'g', sub: 's', body: 'x' }).value.categoryKey, null); // no category
 });
 
 test('pickAutoreplyTemplate: category match wins, else generic fallback', () => {

@@ -293,6 +293,19 @@ export function validateTemplateBody(body) {
   return { ok: true, value: String(body) };
 }
 
+// New auto-reply template: group + sub key form the template_key; category link is optional.
+export function validateTemplateCreate({ group, sub, label, body, categoryKey } = {}) {
+  const g = String(group || '').trim().toLowerCase();
+  const s = String(sub || '').trim().toLowerCase();
+  if (!/^[a-z0-9_]+$/.test(g)) return { ok: false, error: 'Group key may only contain lowercase letters, numbers, and underscores.' };
+  if (!/^[a-z0-9_]+$/.test(s)) return { ok: false, error: 'Sub key may only contain lowercase letters, numbers, and underscores.' };
+  if (!String(body || '').trim()) return { ok: false, error: 'Template body cannot be empty.' };
+  return {
+    ok: true,
+    value: { groupKey: g, subKey: s, label: String(label || '').trim() || null, body: String(body), categoryKey: String(categoryKey || '').trim() || null },
+  };
+}
+
 // Which lead source an auto-reply group's category text should resolve against, from the group key.
 export function autoreplySource(group) {
   const g = String(group || '');
