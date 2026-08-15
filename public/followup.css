@@ -172,3 +172,11 @@
 .fu-hist-row { padding: 0.5rem 0.6rem; border-radius: 8px; background: var(--surface-soft); border: 1px solid var(--border-soft); }
 .fu-hist-meta { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.25rem; }
 .fu-hist-body { font-size: 0.85rem; color: var(--text); white-space: pre-wrap; margin-bottom: 0.4rem; }
+
+/* Sequence + step builder */
+.fu-seqnew { margin-bottom: 1rem; }
+.fu-newseq { padding: 0.75rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-soft); }
+.fu-newseq input[type="text"] { width: 12rem; }
+.fu-step-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.fu-step-editor .as-body { flex: 1 1 100%; min-height: 70px; }
+.fu-addstep-host { border-left: 3px dashed var(--fu-accent); padding-left: 0.6rem; }

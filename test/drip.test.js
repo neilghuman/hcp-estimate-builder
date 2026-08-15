@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   resolveCategoryKey, resolveMessage, renderBody,
   computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
-  smsSegments, validateMessage, validateCategoryMap, validateVariant, validateSequenceSettings,
+  smsSegments, validateMessage, validateCategoryMap, validateVariant, validateSequenceSettings, validateSequenceCreate,
 } from '../src/drip.js';
 const MAP = [
   { category_key: 'stump_grinding', source: 'thumbtack', raw_value: 'Tree Stump Grinding and Removal' },
@@ -279,4 +279,13 @@ test('validateSequenceSettings: rejects bad ranges/format/order and empty patch'
   assert.equal(validateSequenceSettings({ quietStart: '20:00', quietEnd: '08:00' }).ok, false);
   assert.equal(validateSequenceSettings({ variantStrategy: 'nope' }).ok, false);
   assert.equal(validateSequenceSettings({}).ok, false);
+});
+
+test('validateSequenceCreate: normalizes and accepts; rejects bad key/name/source', () => {
+  const ok = validateSequenceCreate({ key: '  Thumbtack_Landscaping ', name: '  Thumbtack (Landscaping) ', source: 'Thumbtack', vertical: 'Landscaping' });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.value, { key: 'thumbtack_landscaping', name: 'Thumbtack (Landscaping)', source: 'thumbtack', vertical: 'landscaping' });
+  assert.equal(validateSequenceCreate({ key: 'bad key', name: 'x', source: 'thumbtack' }).ok, false);
+  assert.equal(validateSequenceCreate({ key: 'ok', name: '', source: 'thumbtack' }).ok, false);
+  assert.equal(validateSequenceCreate({ key: 'ok', name: 'x', source: 'facebook' }).ok, false);
 });

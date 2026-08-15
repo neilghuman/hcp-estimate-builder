@@ -337,6 +337,56 @@ export async function updateSequence(pool, id, patch = {}) {
   return r.rows[0] ? { status: 'updated', sequence: r.rows[0] } : { status: 'not_found' };
 }
 
+// Create a new sequence (seeded inactive so it can't send until reviewed + activated). `settings`
+// is the normalized output of validateSequenceSettings (all optional; DB defaults otherwise).
+export async function createSequence(pool, { key, name, source, vertical }, settings = {}) {
+  const dupe = await pool.query('SELECT 1 FROM drip_sequence WHERE key = $1', [key]);
+  if (dupe.rows.length) return { status: 'conflict' };
+  const r = await pool.query(
+    `INSERT INTO drip_sequence (key, name, source, vertical, is_active, max_messages, expires_after_hours,
+        quiet_start_local, quiet_end_local, variant_strategy)
+     VALUES ($1,$2,$3,$4, FALSE,
+        COALESCE($5, 7), COALESCE($6, 168),
+        COALESCE($7::time, '08:00'::time), COALESCE($8::time, '20:00'::time), COALESCE($9, 'random'))
+     RETURNING id, key, name, source, vertical, is_active`,
+    [key, name, source, vertical || null,
+      settings.maxMessages ?? null, settings.expiresAfterHours ?? null,
+      settings.quietStart ?? null, settings.quietEnd ?? null, settings.variantStrategy ?? null],
+  );
+  return { status: 'created', sequence: r.rows[0] };
+}
+
+// Add a step to a sequence. Unique (sequence_id, step_index). If a body is given, also seeds a
+// default (category-less) variant-A message so the step is immediately sendable.
+export async function addStep(pool, { sequenceId, stepIndex, offsetMinutes, label, body, includeOptout, changedBy } = {}) {
+  const seq = (await pool.query('SELECT id FROM drip_sequence WHERE id = $1', [sequenceId])).rows[0];
+  if (!seq) return { status: 'not_found' };
+  const dupe = await pool.query('SELECT 1 FROM drip_step WHERE sequence_id = $1 AND step_index = $2', [sequenceId, stepIndex]);
+  if (dupe.rows.length) return { status: 'conflict' };
+  const st = await pool.query(
+    `INSERT INTO drip_step (sequence_id, step_index, offset_minutes, label)
+     VALUES ($1,$2,$3,$4) RETURNING id, sequence_id, step_index, offset_minutes, is_active`,
+    [sequenceId, Math.max(0, Math.round(Number(stepIndex))), Math.max(0, Math.round(Number(offsetMinutes) || 0)), label || null],
+  );
+  const step = st.rows[0];
+  let message = null;
+  if (body != null && String(body).trim()) {
+    const m = await pool.query(
+      `INSERT INTO drip_message (step_id, category_key, variant, body, include_optout, updated_by)
+       VALUES ($1, NULL, 'A', $2, $3, $4)
+       RETURNING id, step_id, category_key, variant, body, include_optout, weight, is_active, version`,
+      [step.id, String(body), Boolean(includeOptout), changedBy || 'dashboard'],
+    );
+    message = m.rows[0];
+  }
+  return { status: 'created', step, message };
+}
+
+export async function deleteStep(pool, id) {
+  const r = await pool.query('DELETE FROM drip_step WHERE id = $1 RETURNING id', [id]);
+  return r.rows[0] ? { status: 'deleted', id: r.rows[0].id } : { status: 'not_found' };
+}
+
 // Outcome summary across all enrollments, for the analytics panel.
 export async function dripOutcomes(pool) {
   const r = await pool.query(

@@ -3,9 +3,10 @@
 import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, getSequencesDetailed,
   updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused,
   addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence,
-  revertMessage, getSuppressions, removeSuppression } from './drip_runtime.js';
+  revertMessage, getSuppressions, removeSuppression, createSequence, addStep, deleteStep } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
-import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings } from './drip.js';
+import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings,
+  validateSequenceCreate } from './drip.js';
 import * as cw from './chatwoot.js';
 
 export function registerDripRoutes(app, pool) {
@@ -142,6 +143,49 @@ export function registerDripRoutes(app, pool) {
   app.delete('/api/drip/taxonomy/:id', requireEdit, async (req, res) => {
     try {
       const out = await deleteCategoryMap(pool, Number(req.params.id));
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/drip/sequence', requireEdit, async (req, res) => {
+    const idv = validateSequenceCreate(req.body || {});
+    if (!idv.ok) return res.status(422).json({ error: idv.error });
+    const hasSettings = ['maxMessages', 'expiresAfterHours', 'quietStart', 'quietEnd', 'variantStrategy']
+      .some((k) => req.body?.[k] != null);
+    let settings = {};
+    if (hasSettings) {
+      const sv = validateSequenceSettings(req.body || {});
+      if (!sv.ok) return res.status(422).json({ error: sv.error });
+      settings = sv.value;
+    }
+    try {
+      const out = await createSequence(pool, idv.value, settings);
+      if (out.status === 'conflict') return res.status(409).json({ error: `A sequence with key "${idv.value.key}" already exists.` });
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/drip/step', requireEdit, async (req, res) => {
+    const { sequenceId, stepIndex, offsetMinutes, body, includeOptout } = req.body || {};
+    if (!sequenceId) return res.status(422).json({ error: 'sequenceId is required.' });
+    if (!Number.isInteger(Number(stepIndex)) || Number(stepIndex) < 0) return res.status(422).json({ error: 'stepIndex must be a whole number >= 0.' });
+    if (!Number.isFinite(Number(offsetMinutes)) || Number(offsetMinutes) < 0) return res.status(422).json({ error: 'offsetMinutes must be a number >= 0.' });
+    if (body != null && String(body).trim()) {
+      const issues = validateMessage(body, { includeOptout: Boolean(includeOptout) }).filter((i) => i.level === 'error');
+      if (issues.length) return res.status(422).json({ error: issues[0].message });
+    }
+    try {
+      const out = await addStep(pool, req.body || {});
+      if (out.status === 'not_found') return res.status(404).json({ error: 'Sequence not found.' });
+      if (out.status === 'conflict') return res.status(409).json({ error: `Step ${stepIndex} already exists in this sequence.` });
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/drip/step/:id', requireEdit, async (req, res) => {
+    try {
+      const out = await deleteStep(pool, Number(req.params.id));
       if (out.status === 'not_found') return res.status(404).json(out);
       res.json(out);
     } catch (e) { res.status(500).json({ error: e.message }); }
