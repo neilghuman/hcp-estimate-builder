@@ -1,7 +1,7 @@
 // Drip sweep — unit tests. Pure planners + sweepOnce with mock pool + mock chatwoot.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planStep, planAfterSend, sweepOnce, ensurePendingLabel } from '../src/drip_sweep.js';
+import { planStep, planAfterSend, sweepOnce, ensurePendingLabel, renderVars } from '../src/drip_sweep.js';
 
 const NOON_PDT = new Date('2026-08-14T19:00:00Z'); // 12:00 America/Los_Angeles
 const SEQ = { tz_default: 'America/Los_Angeles', quiet_start_local: '08:00', quiet_end_local: '20:00' };
@@ -12,6 +12,20 @@ const baseEnrollment = {
   step: 1, t0_at: '2026-08-14T18:00:00Z', attempts: 1, max_messages: 7,
   expires_at: '2026-08-21T18:00:00Z', status: 'active',
 };
+
+test('renderVars: city + service with fallbacks', () => {
+  const v = renderVars({ vertical: 'landscaping', category_key: 'yard_cleanup', city: 'Redmond', first_name: null });
+  assert.equal(v.service, 'yard cleanup');
+  assert.equal(v.city, 'Redmond');
+  assert.equal(v.name, 'there');
+  assert.equal(v.Business, 'Washington Landscaping');
+  // no category_key -> fall back to humanized category_raw
+  assert.equal(renderVars({ vertical: 'landscaping', category_raw: 'grading_resloping' }).service, 'grading resloping');
+  // nothing -> defaults
+  const d = renderVars({ vertical: 'tree' });
+  assert.equal(d.service, 'your project');
+  assert.equal(d.city, 'your area');
+});
 const openConv = { status: 'open', labels: ['A_pending_callback'], messages: [{ message_type: 1, private: false, content_attributes: { automation: 'drip' } }] };
 
 test('planStep: suppressed exits', () => {

@@ -43,11 +43,14 @@ export function planAfterSend(enrollment, { steps = [], now = new Date(), sequen
   return { status: 'active', step: nextStep, nextDueAt: due.toISOString() };
 }
 
-function renderVars(enrollment) {
+export function renderVars(enrollment) {
   const business = enrollment.vertical === 'tree' ? 'Washington Tree Services'
     : enrollment.vertical === 'landscaping' ? 'Washington Landscaping' : 'our team';
-  const service = enrollment.category_key ? String(enrollment.category_key).replace(/_/g, ' ') : 'your project';
-  return { name: enrollment.first_name || 'there', service, Business: business };
+  const humanize = (s) => String(s || '').replace(/_/g, ' ').trim();
+  const service = enrollment.category_key ? humanize(enrollment.category_key)
+    : enrollment.category_raw ? humanize(enrollment.category_raw) : 'your project';
+  const city = enrollment.city ? String(enrollment.city).trim() : 'your area';
+  return { name: enrollment.first_name || 'there', service, city, Business: business };
 }
 
 async function resolveMessageFor(pool, enrollment) {
