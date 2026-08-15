@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Follow-up Drip — ScopeFoundry</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark')
+          ? mode
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/followup.css" />
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>📣 Follow-up Drip</h1>
+        <p class="sub">by United Services Northwest &mdash; the automated lead follow-up sequences, their copy, and live status.</p>
+      </div>
+      <div class="toolbar">
+        <a href="/index.html" class="btn-toolbar">🏠 Home</a>
+        <a href="/intake.html" class="btn-toolbar">📝 Intake</a>
+        <a href="/chatfoundry.html" class="btn-toolbar">💬 Chat Foundry</a>
+        <button id="btnRefresh" class="btn-toolbar" title="Refresh">🔄 Refresh</button>
+        <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="followup-main">
+    <div id="msg" class="msg" hidden></div>
+
+    <section class="card fu-note">
+      <p class="hint">
+        <strong>Read-only view.</strong> This shows the live drip configuration, copy, and status.
+        Editing sequences and messages from here arrives in the next sprint — for now changes are made in the database.
+      </p>
+    </section>
+
+    <!-- System status -->
+    <section class="card">
+      <h2>System status</h2>
+      <div id="statusChips" class="fu-chips"></div>
+    </section>
+
+    <!-- Ops summary -->
+    <section class="card">
+      <h2>Enrollments</h2>
+      <div class="fu-stats-grid">
+        <div>
+          <h3>By status</h3>
+          <div id="byStatus" class="fu-badges"></div>
+        </div>
+        <div>
+          <h3>Exits by reason</h3>
+          <div id="byExit" class="fu-badges"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sequences + cadence + copy -->
+    <section class="card">
+      <h2>Sequences &amp; cadence</h2>
+      <div id="sequences" class="fu-sequences"></div>
+    </section>
+
+    <!-- Active enrollments -->
+    <section class="card">
+      <h2>Active enrollments</h2>
+      <div id="activeWrap" class="fu-table-wrap">
+        <table class="fu-table" id="activeTable">
+          <thead>
+            <tr><th>Lead</th><th>Vertical</th><th>Category</th><th>Step</th><th>Next due</th></tr>
+          </thead>
+          <tbody id="activeBody"></tbody>
+        </table>
+        <p id="activeEmpty" class="hint" hidden>No active enrollments right now.</p>
+      </div>
+    </section>
+
+    <!-- Taxonomy -->
+    <section class="card">
+      <h2>Category taxonomy</h2>
+      <p class="hint">How raw platform categories map to the canonical keys used for category-specific copy.</p>
+      <div class="fu-table-wrap">
+        <table class="fu-table" id="taxTable">
+          <thead>
+            <tr><th>Category key</th><th>Source</th><th>Raw value</th></tr>
+          </thead>
+          <tbody id="taxBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/theme.js"></script>
+  <script src="/followup.js"></script>
+</body>
+</html>

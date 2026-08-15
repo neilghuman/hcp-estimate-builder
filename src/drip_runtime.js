@@ -2,9 +2,8 @@
 // decision logic lives in ./drip.js. Sends are NOT performed here — S2 stops at enrollment,
 // message resolution, and reporting. The sweep/send path is gated and added in a later sprint.
 import {
-  resolveMessage, resolveCategoryKey, computeNextDueAt, applyQuietHours,
+  resolveMessage, resolveCategoryKey, computeNextDueAt, applyQuietHours, nestSequences,
 } from './drip.js';
-
 export function dripConfig() {
   const flag = (v, def) => String(process.env[v] ?? def).toLowerCase();
   return {
@@ -203,4 +202,27 @@ export async function applyAfterSend(pool, id, after, sentAt = new Date()) {
       [id, after.step, after.nextDueAt, new Date(sentAt).toISOString()],
     );
   }
+}
+
+// Full config tree (sequences -> steps -> messages) + taxonomy, for the read-only dashboard.
+export async function getSequencesDetailed(pool) {
+  const seq = await pool.query(
+    `SELECT id, key, name, source, vertical, channel, is_active, max_messages, expires_after_hours,
+            quiet_start_local, quiet_end_local, tz_default, variant_strategy
+       FROM drip_sequence ORDER BY key`,
+  );
+  const steps = await pool.query(
+    'SELECT id, sequence_id, step_index, offset_minutes, label, is_active FROM drip_step ORDER BY sequence_id, step_index',
+  );
+  const msgs = await pool.query(
+    `SELECT id, step_id, category_key, variant, body, include_optout, weight, is_active
+       FROM drip_message ORDER BY step_id, category_key NULLS FIRST, variant`,
+  );
+  const taxonomy = await pool.query(
+    'SELECT category_key, source, raw_value FROM drip_category_map ORDER BY category_key, source, raw_value',
+  );
+  return {
+    sequences: nestSequences(seq.rows, steps.rows, msgs.rows),
+    taxonomy: taxonomy.rows,
+  };
 }

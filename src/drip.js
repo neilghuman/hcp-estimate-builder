@@ -121,3 +121,42 @@ export function evaluateStop(conv, { pendingLabel = 'A_pending_callback', automa
   return human ? 'human_response' : null;
 }
 
+// ---- Read-model assembly (dashboard) -----------------------------------------
+// Nest flat sequence/step/message rows into a display tree. Pure so it can be unit tested.
+export function nestSequences(seqRows = [], stepRows = [], msgRows = []) {
+  const msgByStep = new Map();
+  for (const m of msgRows) {
+    const arr = msgByStep.get(m.step_id) || [];
+    arr.push({
+      category_key: m.category_key ?? null,
+      variant: m.variant,
+      body: m.body,
+      include_optout: m.include_optout,
+      weight: m.weight,
+      is_active: m.is_active,
+    });
+    msgByStep.set(m.step_id, arr);
+  }
+  const stepsBySeq = new Map();
+  for (const s of stepRows) {
+    const arr = stepsBySeq.get(s.sequence_id) || [];
+    arr.push({
+      id: s.id,
+      step_index: s.step_index,
+      offset_minutes: s.offset_minutes,
+      label: s.label ?? null,
+      is_active: s.is_active,
+      messages: (msgByStep.get(s.id) || []).sort((a, b) => {
+        const ac = a.category_key || '';
+        const bc = b.category_key || '';
+        return ac.localeCompare(bc) || String(a.variant).localeCompare(String(b.variant));
+      }),
+    });
+    stepsBySeq.set(s.sequence_id, arr);
+  }
+  return seqRows.map((q) => ({
+    ...q,
+    steps: (stepsBySeq.get(q.id) || []).sort((a, b) => a.step_index - b.step_index),
+  }));
+}
+
