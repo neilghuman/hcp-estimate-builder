@@ -429,10 +429,37 @@ export async function resolveAutoreply(pool, group, rawCategory) {
   };
 }
 
+// Create a new template. group + sub form template_key; category link is optional.
+export async function createTemplate(pool, { groupKey, subKey, label, body, categoryKey }) {
+  const key = `${groupKey}.${subKey}`;
+  const r = await pool.query(
+    `INSERT INTO drip_template (template_key, group_key, sub_key, category_key, label, body)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (template_key) DO NOTHING
+     RETURNING id, template_key, group_key, sub_key, category_key, label, body, version`,
+    [key, groupKey, subKey, categoryKey || null, label || null, String(body)],
+  );
+  return r.rows[0] ? { status: 'created', template: r.rows[0] } : { status: 'exists' };
+}
+
+// Link / re-link / unlink (categoryKey null) a template to a category taxonomy key.
+export async function setTemplateCategory(pool, key, categoryKey) {
+  const r = await pool.query(
+    'UPDATE drip_template SET category_key = $2, updated_at = now() WHERE template_key = $1 RETURNING template_key, group_key, sub_key, category_key, label, body, version',
+    [key, categoryKey || null],
+  );
+  return r.rows[0] ? { status: 'updated', template: r.rows[0] } : { status: 'not_found' };
+}
+
+export async function deleteTemplate(pool, key) {
+  await pool.query('DELETE FROM drip_template_history WHERE template_key = $1', [key]);
+  const r = await pool.query('DELETE FROM drip_template WHERE template_key = $1 RETURNING template_key', [key]);
+  return r.rows[0] ? { status: 'deleted', key: r.rows[0].template_key } : { status: 'not_found' };
+}
+
 // Idempotent seed/populate (used by the one-time populate-from-n8n script). Does NOT overwrite an
 // existing row's body, so later dashboard edits are preserved on re-run.
-export async function upsertTemplate(pool, { templateKey, groupKey, subKey, label, body }) {
-  const r = await pool.query(
+export async function upsertTemplate(pool, { templateKey, groupKey, subKey, label, body }) {  const r = await pool.query(
     `INSERT INTO drip_template (template_key, group_key, sub_key, label, body)
      VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT (template_key) DO NOTHING

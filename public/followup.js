@@ -706,29 +706,62 @@ async function reloadSuppressions() {
 }
 
 // ---- Auto-reply templates ----
+function categoryKeyOptions(selected) {
+  const keys = [...new Set([
+    ...(state.taxonomy || []).map((t) => t.category_key),
+    ...(state.templates || []).map((t) => t.category_key),
+  ].filter(Boolean))].sort();
+  const opts = keys.map((k) => `<option value="${esc(k)}"${k === selected ? ' selected' : ''}>${esc(k)}</option>`).join('');
+  return `<option value="">(no category)</option>${opts}`;
+}
+
 function renderTemplates(list) {
   state.templates = list || [];
   const canEdit = state.cfg.editEnabled;
   const groups = {};
   for (const t of state.templates) { (groups[t.group_key] = groups[t.group_key] || []).push(t); }
   const keys = Object.keys(groups).sort();
-  if (keys.length === 0) { $('templates').innerHTML = '<p class="hint">No auto-reply templates yet.</p>'; return; }
-  $('templates').innerHTML = keys.map((g) => {
+  const groupsHtml = keys.map((g) => {
     const rows = groups[g].map((t) => {
       const seg = smsSegments(t.body);
       const ver = t.version ? `<span class="fu-ver">v${esc(t.version)}</span>` : '';
-      const versionsBtn = (canEdit && Number(t.version) > 1) ? `<button class="fu-btn fu-tpl-versions" data-key="${esc(t.template_key)}">🕘 Versions</button>` : '';
-      const editBtn = canEdit ? `<button class="fu-btn fu-tpl-edit" data-key="${esc(t.template_key)}">✎ Edit</button>` : '';
-      const cat = t.category_key ? ` <span class="fu-cat" title="Selected when a lead resolves to this category">🏷️ ${esc(t.category_key)}</span>` : '';
+      const cat = t.category_key ? ` <span class="fu-cat" title="Auto-reply is chosen when a lead resolves to this category">🏷️ ${esc(t.category_key)}</span>` : '';
+      const actions = canEdit ? `
+        <div class="fu-msg-actions">
+          <button class="fu-btn fu-tpl-edit" data-key="${esc(t.template_key)}">✎ Edit</button>
+          ${Number(t.version) > 1 ? `<button class="fu-btn fu-tpl-versions" data-key="${esc(t.template_key)}">🕘 Versions</button>` : ''}
+          <label class="fu-tpl-catsel" title="Link this template to a category taxonomy">🏷️ <select class="fu-tpl-cat" data-key="${esc(t.template_key)}">${categoryKeyOptions(t.category_key || '')}</select></label>
+          <button class="fu-btn danger fu-tpl-del" data-key="${esc(t.template_key)}">🗑 Delete</button>
+        </div>` : '';
       return `
         <div class="fu-msg" data-tpl="${esc(t.template_key)}">
           <div class="fu-msg-label">${esc(t.label || t.sub_key)} <code>${esc(t.sub_key)}</code>${cat}${ver} <span class="fu-ver">${seg.segments} seg</span></div>
           <div class="fu-msg-text">${esc(t.body)}</div>
-          ${(editBtn || versionsBtn) ? `<div class="fu-msg-actions">${editBtn}${versionsBtn}</div>` : ''}
+          ${actions}
         </div>`;
     }).join('');
     return `<div class="fu-seq"><div class="fu-seq-head"><h3>${esc(g)}</h3></div><div class="fu-steps"><div class="fu-step">${rows}</div></div></div>`;
   }).join('');
+
+  const empty = keys.length === 0 ? '<p class="hint">No auto-reply templates yet.</p>' : '';
+  const grpList = [...new Set((state.templates || []).map((t) => t.group_key))].sort();
+  const addForm = canEdit ? `
+    <div class="fu-seq fu-tpl-new">
+      <div class="fu-seq-head"><h3>➕ New template</h3></div>
+      <div class="fu-tpl-newform">
+        <div class="fu-tpl-newrow">
+          <input list="fu-grp-list" class="fu-nt-group" placeholder="group (e.g. autoreply_tt_tree)" />
+          <datalist id="fu-grp-list">${grpList.map((g) => `<option value="${esc(g)}"></option>`).join('')}</datalist>
+          <input type="text" class="fu-nt-sub" placeholder="sub key (e.g. tree_removal)" />
+          <input type="text" class="fu-nt-label" placeholder="label (optional)" />
+          <label class="fu-tpl-catsel" title="Link to a category taxonomy (optional)">🏷️ <select class="fu-nt-cat">${categoryKeyOptions('')}</select></label>
+        </div>
+        <textarea class="fu-nt-body" placeholder="message body…"></textarea>
+        <div class="fu-msg-actions"><button class="fu-btn primary fu-tpl-create">➕ Add template</button></div>
+      </div>
+    </div>` : '';
+
+  $('templates').innerHTML = groupsHtml + empty + addForm;
 }
 
 function findTemplate(key) { return (state.templates || []).find((t) => t.template_key === key); }
@@ -788,6 +821,39 @@ async function revertTemplateUI(key, version) {
   } catch (e) { showMsg(e.message); }
 }
 
+async function setTemplateCategoryUI(key, categoryKey) {
+  try {
+    const out = await api(`/api/drip/template/${encodeURIComponent(key)}/category`, { method: 'PUT', body: { categoryKey: categoryKey || null } });
+    const t = findTemplate(key); if (t) t.category_key = out.template.category_key;
+    renderTemplates(state.templates);
+    showMsg(categoryKey ? `Linked to category “${categoryKey}”.` : 'Category link removed.', 'success');
+  } catch (e) { showMsg(e.message); renderTemplates(state.templates); }
+}
+
+async function deleteTemplateUI(key) {
+  if (!window.confirm(`Delete template “${key}”? This cannot be undone.`)) return;
+  try {
+    await api(`/api/drip/template/${encodeURIComponent(key)}`, { method: 'DELETE' });
+    state.templates = (state.templates || []).filter((t) => t.template_key !== key);
+    renderTemplates(state.templates);
+    showMsg('Template deleted.', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+async function createTemplateUI(scope) {
+  const val = (sel) => (scope.querySelector(sel)?.value || '').trim();
+  const body = scope.querySelector('.fu-nt-body')?.value || '';
+  try {
+    const out = await api('/api/drip/template', {
+      method: 'POST',
+      body: { group: val('.fu-nt-group'), sub: val('.fu-nt-sub'), label: val('.fu-nt-label'), categoryKey: val('.fu-nt-cat'), body },
+    });
+    state.templates.push(out.template);
+    renderTemplates(state.templates);
+    showMsg(`Added ${out.template.template_key}.`, 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
 $('templates').addEventListener('click', (e) => {
   const t = (sel) => e.target.closest(sel);
   let el;
@@ -795,7 +861,13 @@ $('templates').addEventListener('click', (e) => {
   if ((el = t('.fu-tpl-versions'))) return openTemplateHistory(el.dataset.key);
   if ((el = t('.fu-tpl-save'))) return saveTemplate(el.dataset.key, el.closest('[data-tpl]'));
   if ((el = t('.fu-tpl-revert'))) return revertTemplateUI(el.dataset.key, el.dataset.version);
+  if ((el = t('.fu-tpl-del'))) return deleteTemplateUI(el.dataset.key);
+  if (t('.fu-tpl-create')) return createTemplateUI(document.querySelector('.fu-tpl-newform'));
   if (t('.fu-tpl-cancel')) return renderTemplates(state.templates);
+});
+$('templates').addEventListener('change', (e) => {
+  const el = e.target.closest('.fu-tpl-cat');
+  if (el) setTemplateCategoryUI(el.dataset.key, el.value);
 });
 $('templates').addEventListener('input', (e) => {
   if (e.target.classList.contains('fu-tpl-body')) updateTemplateSeg(e.target.closest('[data-tpl]'));
@@ -831,8 +903,8 @@ async function load() {
     renderOutcomes(report.outcomes);
     renderSeqNew();
     renderSequences();
-    renderTemplates((await api('/api/drip/templates')).templates);
     renderTaxonomy(detail.taxonomy);
+    renderTemplates((await api('/api/drip/templates')).templates);
     renderActive(active.enrollments || []);
     renderSuppressions((await api('/api/drip/suppressions')).suppressions);
   } catch (e) {
