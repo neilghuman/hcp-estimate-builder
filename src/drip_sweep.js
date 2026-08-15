@@ -22,7 +22,7 @@ export function planStep(enrollment, { conv, suppressed = false, now = new Date(
   if (suppressed) return { action: 'exit', reason: 'suppressed' };
   if (enrollment.expires_at && nowMs >= new Date(enrollment.expires_at).getTime()) return { action: 'exit', reason: 'expired' };
   if (Number(enrollment.attempts) >= Number(enrollment.max_messages)) return { action: 'exit', reason: 'max_reached' };
-  const stop = evaluateStop(conv);
+  const stop = evaluateStop(conv, { since: enrollment.t0_at });
   if (stop) return { action: 'exit', reason: stop };
   const allowed = applyQuietHours(new Date(now), quietOpts(enrollment, sequence));
   if (allowed.getTime() > nowMs) return { action: 'defer', nextDueAt: allowed.toISOString() };

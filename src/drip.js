@@ -83,15 +83,31 @@ export function applyQuietHours(date, { tz = 'America/Los_Angeles', start = '08:
   return delay === 0 ? date : new Date(date.getTime() + delay * 60000);
 }
 
+// Normalize a Chatwoot message timestamp to epoch ms. Chatwoot uses unix SECONDS for created_at;
+// tolerate ms and ISO strings too. Returns null when unknown.
+function msgTimeMs(m) {
+  const v = m.created_at ?? m.createdAt;
+  if (v == null) return null;
+  if (typeof v === 'number') return v < 1e12 ? v * 1000 : v; // seconds vs ms
+  const t = new Date(v).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
 // ---- Stop-condition evaluation (Chatwoot-anchored) ---------------------------
 // conv: { status, labels[], messages[] }. Returns an exit reason string or null (continue).
 // A drip's own outbound send is tagged content_attributes.automation === automationKey and is
-// NOT treated as a human response.
-export function evaluateStop(conv, { pendingLabel = 'A_pending_callback', automationKey = 'drip' } = {}) {
+// NOT treated as a human response. `since` (enrollment T0) excludes the triggering inbound lead and
+// the initial welcome — only human/agent activity AFTER we started the drip counts as a response.
+export function evaluateStop(conv, { pendingLabel = 'A_pending_callback', automationKey = 'drip', since = null } = {}) {
   if (!conv) return null;
   if (String(conv.status || '').toLowerCase() === 'resolved') return 'resolved';
   if (!(conv.labels || []).includes(pendingLabel)) return 'label_removed';
+  const sinceMs = since != null ? new Date(since).getTime() : null;
   const human = (conv.messages || []).some((m) => {
+    if (sinceMs != null) {
+      const ts = msgTimeMs(m);
+      if (ts != null && ts <= sinceMs) return false; // pre-enrollment activity (lead/welcome) — ignore
+    }
     const t = m.message_type;
     const incoming = t === 0 || String(t) === 'incoming';
     const outgoing = t === 1 || String(t) === 'outgoing';
