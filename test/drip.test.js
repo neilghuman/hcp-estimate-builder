@@ -5,6 +5,7 @@ import {
   resolveCategoryKey, resolveMessage, renderBody,
   computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
   smsSegments, validateMessage, validateCategoryMap, validateVariant, validateSequenceSettings, validateSequenceCreate,
+  validateTemplateBody,
 } from '../src/drip.js';
 const MAP = [
   { category_key: 'stump_grinding', source: 'thumbtack', raw_value: 'Tree Stump Grinding and Removal' },
@@ -288,4 +289,11 @@ test('validateSequenceCreate: normalizes and accepts; rejects bad key/name/sourc
   assert.equal(validateSequenceCreate({ key: 'bad key', name: 'x', source: 'thumbtack' }).ok, false);
   assert.equal(validateSequenceCreate({ key: 'ok', name: '', source: 'thumbtack' }).ok, false);
   assert.equal(validateSequenceCreate({ key: 'ok', name: 'x', source: 'facebook' }).ok, false);
+});
+
+test('validateTemplateBody: rejects empty, accepts content (incl emoji)', () => {
+  assert.equal(validateTemplateBody('   ').ok, false);
+  const ok = validateTemplateBody('Hi! 🌳 pricing…');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.value, 'Hi! 🌳 pricing…');
 });

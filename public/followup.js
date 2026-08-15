@@ -705,6 +705,101 @@ async function reloadSuppressions() {
   renderSuppressions(suppressions);
 }
 
+// ---- Auto-reply templates ----
+function renderTemplates(list) {
+  state.templates = list || [];
+  const canEdit = state.cfg.editEnabled;
+  const groups = {};
+  for (const t of state.templates) { (groups[t.group_key] = groups[t.group_key] || []).push(t); }
+  const keys = Object.keys(groups).sort();
+  if (keys.length === 0) { $('templates').innerHTML = '<p class="hint">No auto-reply templates yet.</p>'; return; }
+  $('templates').innerHTML = keys.map((g) => {
+    const rows = groups[g].map((t) => {
+      const seg = smsSegments(t.body);
+      const ver = t.version ? `<span class="fu-ver">v${esc(t.version)}</span>` : '';
+      const versionsBtn = (canEdit && Number(t.version) > 1) ? `<button class="fu-btn fu-tpl-versions" data-key="${esc(t.template_key)}">🕘 Versions</button>` : '';
+      const editBtn = canEdit ? `<button class="fu-btn fu-tpl-edit" data-key="${esc(t.template_key)}">✎ Edit</button>` : '';
+      return `
+        <div class="fu-msg" data-tpl="${esc(t.template_key)}">
+          <div class="fu-msg-label">${esc(t.label || t.sub_key)} <code>${esc(t.sub_key)}</code>${ver} <span class="fu-ver">${seg.segments} seg</span></div>
+          <div class="fu-msg-text">${esc(t.body)}</div>
+          ${(editBtn || versionsBtn) ? `<div class="fu-msg-actions">${editBtn}${versionsBtn}</div>` : ''}
+        </div>`;
+    }).join('');
+    return `<div class="fu-seq"><div class="fu-seq-head"><h3>${esc(g)}</h3></div><div class="fu-steps"><div class="fu-step">${rows}</div></div></div>`;
+  }).join('');
+}
+
+function findTemplate(key) { return (state.templates || []).find((t) => t.template_key === key); }
+
+function openTemplateEditor(key) {
+  const t = findTemplate(key); if (!t) return;
+  const node = document.querySelector(`[data-tpl="${key}"]`);
+  node.innerHTML = `
+    <div class="fu-editor" data-tpl-edit="${esc(key)}">
+      <textarea class="fu-ed-body fu-tpl-body">${esc(t.body)}</textarea>
+      <div class="fu-ed-meta"><span class="fu-ed-seg"></span></div>
+      <div class="fu-msg-actions">
+        <button class="fu-btn primary fu-tpl-save" data-key="${esc(key)}">Save</button>
+        <button class="fu-btn fu-tpl-cancel">Cancel</button>
+      </div>
+    </div>`;
+  updateTemplateSeg(node);
+  node.querySelector('.fu-tpl-body').focus();
+}
+
+function updateTemplateSeg(node) {
+  const seg = smsSegments(node.querySelector('.fu-tpl-body').value);
+  node.querySelector('.fu-ed-seg').innerHTML = `<b>${seg.segments}</b> SMS segment${seg.segments === 1 ? '' : 's'} · ${seg.units} chars · ${seg.encoding}`;
+}
+
+async function saveTemplate(key, node) {
+  const body = node.querySelector('.fu-tpl-body').value;
+  if (!body.trim()) { showMsg('Template body cannot be empty.'); return; }
+  try {
+    const out = await api(`/api/drip/template/${encodeURIComponent(key)}`, { method: 'PUT', body: { body, changedBy: getEditor() || undefined } });
+    const t = findTemplate(key); if (t && out.template) Object.assign(t, out.template);
+    renderTemplates(state.templates);
+    showMsg(out.versioned ? `Saved — now v${out.template.version}.` : 'Saved.', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+async function openTemplateHistory(key) {
+  const node = document.querySelector(`[data-tpl="${key}"]`);
+  try {
+    const { history } = await api(`/api/drip/template/${encodeURIComponent(key)}/history`);
+    const rows = (history || []).map((h) => `
+      <div class="fu-hist-row">
+        <div class="fu-hist-meta">v${esc(h.version)} · ${esc(h.changed_by || 'unknown')} · ${fmtDue(h.changed_at)}</div>
+        <div class="fu-hist-body">${esc(h.body)}</div>
+        <button class="fu-btn fu-tpl-revert" data-key="${esc(key)}" data-version="${esc(h.version)}">↩ Revert to v${esc(h.version)}</button>
+      </div>`).join('');
+    node.innerHTML = `<div class="fu-history"><div class="fu-msg-label">Version history</div>${rows || '<p class="hint">No prior versions.</p>'}<div class="fu-msg-actions"><button class="fu-btn fu-tpl-cancel">Close</button></div></div>`;
+  } catch (e) { showMsg(e.message); }
+}
+
+async function revertTemplateUI(key, version) {
+  try {
+    await api(`/api/drip/template/${encodeURIComponent(key)}/revert`, { method: 'POST', body: { version: Number(version), changedBy: getEditor() || undefined } });
+    const detail = await api('/api/drip/templates');
+    renderTemplates(detail.templates);
+    showMsg(`Reverted to v${version}.`, 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+$('templates').addEventListener('click', (e) => {
+  const t = (sel) => e.target.closest(sel);
+  let el;
+  if ((el = t('.fu-tpl-edit'))) return openTemplateEditor(el.dataset.key);
+  if ((el = t('.fu-tpl-versions'))) return openTemplateHistory(el.dataset.key);
+  if ((el = t('.fu-tpl-save'))) return saveTemplate(el.dataset.key, el.closest('[data-tpl]'));
+  if ((el = t('.fu-tpl-revert'))) return revertTemplateUI(el.dataset.key, el.dataset.version);
+  if (t('.fu-tpl-cancel')) return renderTemplates(state.templates);
+});
+$('templates').addEventListener('input', (e) => {
+  if (e.target.classList.contains('fu-tpl-body')) updateTemplateSeg(e.target.closest('[data-tpl]'));
+});
+
 function renderModeNote() {
   const el = $('modeNote');
   if (state.cfg.editEnabled) {
@@ -735,6 +830,7 @@ async function load() {
     renderOutcomes(report.outcomes);
     renderSeqNew();
     renderSequences();
+    renderTemplates((await api('/api/drip/templates')).templates);
     renderTaxonomy(detail.taxonomy);
     renderActive(active.enrollments || []);
     renderSuppressions((await api('/api/drip/suppressions')).suppressions);

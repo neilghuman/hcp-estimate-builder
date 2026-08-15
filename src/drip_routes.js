@@ -3,10 +3,11 @@
 import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, getSequencesDetailed,
   updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused,
   addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence,
-  revertMessage, getSuppressions, removeSuppression, createSequence, addStep, deleteStep } from './drip_runtime.js';
+  revertMessage, getSuppressions, removeSuppression, createSequence, addStep, deleteStep,
+  getTemplates, getTemplateGroup, updateTemplate, getTemplateHistory, revertTemplate } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
 import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings,
-  validateSequenceCreate } from './drip.js';
+  validateSequenceCreate, validateTemplateBody } from './drip.js';
 import * as cw from './chatwoot.js';
 
 export function registerDripRoutes(app, pool) {
@@ -186,6 +187,43 @@ export function registerDripRoutes(app, pool) {
   app.delete('/api/drip/step/:id', requireEdit, async (req, res) => {
     try {
       const out = await deleteStep(pool, Number(req.params.id));
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ---- Auto-reply templates (welcome copy; n8n reads a group, dashboard edits) ----
+  app.get('/api/drip/templates', async (_req, res) => {
+    try { res.json({ templates: await getTemplates(pool) }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/drip/templates/:group', async (req, res) => {
+    try { res.json(await getTemplateGroup(pool, req.params.group)); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/drip/template/:key/history', async (req, res) => {
+    try { res.json({ history: await getTemplateHistory(pool, req.params.key) }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put('/api/drip/template/:key', requireEdit, async (req, res) => {
+    const v = validateTemplateBody(req.body?.body);
+    if (!v.ok) return res.status(422).json({ error: v.error });
+    try {
+      const out = await updateTemplate(pool, req.params.key, v.value, req.body?.changedBy);
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/drip/template/:key/revert', requireEdit, async (req, res) => {
+    const version = Number(req.body?.version);
+    if (!Number.isInteger(version)) return res.status(422).json({ error: 'A numeric version is required.' });
+    try {
+      const out = await revertTemplate(pool, req.params.key, version, req.body?.changedBy);
+      if (out.status === 'version_not_found') return res.status(404).json({ error: `Version ${version} not found.` });
       if (out.status === 'not_found') return res.status(404).json(out);
       res.json(out);
     } catch (e) { res.status(500).json({ error: e.message }); }

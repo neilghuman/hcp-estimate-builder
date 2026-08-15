@@ -287,3 +287,9 @@ export function validateSequenceCreate({ key, name, source, vertical } = {}) {
   return { ok: true, value: { key: k, name: nm, source: src, vertical: vert } };
 }
 
+// Auto-reply templates are free-form (long, emoji-rich); only require non-empty.
+export function validateTemplateBody(body) {
+  if (!String(body || '').trim()) return { ok: false, error: 'Template body cannot be empty.' };
+  return { ok: true, value: String(body) };
+}
+
