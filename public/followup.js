@@ -7,6 +7,20 @@ const $ = (id) => document.getElementById(id);
 const state = { cfg: {}, sequences: [], paused: false, stepStats: [], variantStats: [], taxonomy: [], suppressions: [] };
 const getEditor = () => localStorage.getItem('fu-editor') || '';
 
+// Page config lets one shared script drive several pages (overview / per-source / global).
+// Default 'all' = the original single long page (every section, no source filter).
+const PAGE = window.FU_PAGE || { mode: 'all', source: null };
+const SOURCES = [
+  { key: 'google_lsa', label: 'Google LSA', groupPrefix: 'autoreply_lsa_', href: '/followup-lsa.html' },
+  { key: 'thumbtack', label: 'Thumbtack', groupPrefix: 'autoreply_tt_', href: '/followup-thumbtack.html' },
+  { key: 'yelp', label: 'Yelp', groupPrefix: 'autoreply_yelp_', href: '/followup-yelp.html' },
+  { key: 'angi', label: 'Angi', groupPrefix: 'autoreply_angi_', href: '/followup-angi.html' },
+];
+const has = (id) => !!$(id);
+const sourceForGroup = (g) => (SOURCES.find((s) => String(g).startsWith(s.groupPrefix)) || {}).key || null;
+// In source mode, only that source is in scope (taxonomy 'any' handled separately in its renderer).
+const inScope = (src) => PAGE.mode !== 'source' || src === PAGE.source;
+
 function showMsg(text, kind = 'error') {
   const el = $('msg');
   el.textContent = text;
@@ -135,6 +149,42 @@ function renderOutcomes(o) {
   ].join('');
 }
 
+// Shared top nav across the overview / per-source / global pages.
+function renderNav() {
+  const items = [{ label: '📊 Overview', href: '/followup.html', key: 'overview' }];
+  const activeSources = new Set((state.sequences || []).map((s) => s.source));
+  for (const s of SOURCES) {
+    if (activeSources.has(s.key) || s.key === 'google_lsa' || s.key === 'thumbtack') items.push({ label: s.label, href: s.href, key: s.key });
+  }
+  items.push({ label: '⚙️ Global', href: '/followup-global.html', key: 'global' });
+  const cur = PAGE.mode === 'source' ? PAGE.source : PAGE.mode;
+  $('fuNav').innerHTML = items.map((i) => `<a class="fu-nav-link${i.key === cur ? ' active' : ''}" href="${i.href}">${esc(i.label)}</a>`).join('');
+}
+
+// Overview cards: one per source with its headline numbers, linking to the source page.
+function renderBySource(rows) {
+  const bySrc = Object.fromEntries((rows || []).map((r) => [r.source, r]));
+  const cards = SOURCES.filter((s) => bySrc[s.key] || (state.sequences || []).some((q) => q.source === s.key)).map((s) => {
+    const r = bySrc[s.key] || {};
+    const tile = (n, l) => `<div class="fu-tile"><div class="fu-tile-n">${esc(n ?? 0)}</div><div class="fu-tile-l">${esc(l)}</div></div>`;
+    return `<a class="fu-src-card" href="${s.href}">
+      <div class="fu-src-head"><h3>${esc(s.label)}</h3><span class="fu-nav-link">Open →</span></div>
+      <div class="fu-outcomes">${tile(r.active, 'active')}${tile(r.replied, 'replied')}${tile(`${r.response_rate ?? 0}%`, 'reply rate')}${tile(r.total, 'enrolled')}</div>
+    </a>`;
+  }).join('');
+  $('bySource').innerHTML = cards || '<p class="hint">No sources yet.</p>';
+}
+
+// One source's headline numbers, for the top of a per-source page.
+function renderSrcStats(rows) {
+  const r = (rows || []).find((x) => x.source === PAGE.source) || {};
+  const tile = (n, l) => `<div class="fu-tile"><div class="fu-tile-n">${esc(n ?? 0)}</div><div class="fu-tile-l">${esc(l)}</div></div>`;
+  $('srcStats').innerHTML = [
+    tile(r.active, 'active'), tile(r.replied, 'replied'), tile(`${r.response_rate ?? 0}%`, 'reply rate'),
+    tile(r.completed, 'completed'), tile(r.total, 'enrolled'),
+  ].join('');
+}
+
 function msgInnerHTML(m) {
   const isCat = m.category_key != null;
   const label = isCat
@@ -156,8 +206,8 @@ function msgInnerHTML(m) {
 }
 
 function renderSequences() {
-  const sequences = state.sequences;
-  if (!sequences || sequences.length === 0) { $('sequences').innerHTML = '<p class="hint">No sequences configured.</p>'; return; }
+  const sequences = (state.sequences || []).filter((seq) => inScope(seq.source));
+  if (sequences.length === 0) { $('sequences').innerHTML = '<p class="hint">No sequences configured.</p>'; return; }
   $('sequences').innerHTML = sequences.map((seq) => {
     const toggle = state.cfg.editEnabled
       ? `<button class="fu-btn fu-seq-toggle ${seq.is_active ? 'danger' : 'ok'}" data-seq="${esc(seq.id)}" data-active="${seq.is_active ? '1' : '0'}">${seq.is_active ? 'Deactivate' : 'Activate'}</button>`
@@ -561,7 +611,7 @@ async function saveStep(id, head) {
 }
 
 // Delegated events for the sequences panel.
-$('sequences').addEventListener('click', (e) => {
+$('sequences')?.addEventListener('click', (e) => {
   const t = (sel) => e.target.closest(sel);
   let el;
   if ((el = t('.fu-edit'))) return openEditor(el.dataset.edit);
@@ -585,7 +635,7 @@ $('sequences').addEventListener('click', (e) => {
   if ((el = t('.fu-step-save'))) return saveStep(el.dataset.stepSave, el.closest('[data-step-head]'));
   if (t('.fu-step-cancel')) return renderSequences();
 });
-$('sequences').addEventListener('input', (e) => {
+$('sequences')?.addEventListener('input', (e) => {
   const ed = e.target.closest('.fu-editor'); if (!ed) return;
   if (e.target.classList.contains('fu-ed-cat')) ed.dataset.category = e.target.value.trim();
   updateEditorFeedback(ed.closest('.fu-msg'));
@@ -608,11 +658,15 @@ function renderActive(enrollments) {
 function renderTaxonomy(taxonomy) {
   state.taxonomy = taxonomy || [];
   const canEdit = state.cfg.editEnabled;
-  $('taxBody').innerHTML = state.taxonomy.map((t) => `
+  const rows = state.taxonomy.filter((t) => inScope(t.source) || t.source === 'any');
+  $('taxBody').innerHTML = rows.map((t) => {
+    const readOnly = PAGE.mode === 'source' && t.source === 'any';
+    return `
     <tr data-cat="${esc(t.category_key)}">
       <td><button type="button" class="fu-linkkey fu-tax-key" data-cat="${esc(t.category_key)}" title="Jump to templates using this category"><code>${esc(t.category_key)}</code></button></td><td>${esc(t.source)}</td><td>${esc(t.raw_value)}</td>
-      <td>${canEdit ? `<button class="fu-btn danger fu-tax-del" data-tax="${esc(t.id)}" title="Delete">✕</button>` : ''}</td>
-    </tr>`).join('');
+      <td>${canEdit && !readOnly ? `<button class="fu-btn danger fu-tax-del" data-tax="${esc(t.id)}" title="Delete">✕</button>` : ''}</td>
+    </tr>`;
+  }).join('');
 
   const add = $('taxAdd');
   if (!canEdit) { add.hidden = true; return; }
@@ -625,7 +679,7 @@ function renderTaxonomy(taxonomy) {
   $('taxAddBtn').addEventListener('click', addTaxonomy);
 }
 
-$('taxBody').addEventListener('click', (e) => {
+$('taxBody')?.addEventListener('click', (e) => {
   const del = e.target.closest('.fu-tax-del');
   if (del) return deleteTaxonomy(del.dataset.tax);
   const key = e.target.closest('.fu-tax-key');
@@ -698,7 +752,7 @@ function renderSuppressions(list) {
   $('supAddBtn').addEventListener('click', addSuppressionUI);
 }
 
-$('supBody').addEventListener('click', (e) => {
+$('supBody')?.addEventListener('click', (e) => {
   const del = e.target.closest('.fu-sup-del');
   if (del) return deleteSuppressionUI(del.dataset.phone);
 });
@@ -741,7 +795,7 @@ function renderTemplates(list) {
   state.templates = list || [];
   const canEdit = state.cfg.editEnabled;
   const groups = {};
-  for (const t of state.templates) { (groups[t.group_key] = groups[t.group_key] || []).push(t); }
+  for (const t of state.templates) { if (!inScope(sourceForGroup(t.group_key))) continue; (groups[t.group_key] = groups[t.group_key] || []).push(t); }
   const keys = Object.keys(groups).sort();
   const groupsHtml = keys.map((g) => {
     const rows = groups[g].map((t) => {
@@ -887,7 +941,7 @@ async function createTemplateUI(scope) {
   } catch (e) { showMsg(e.message); }
 }
 
-$('templates').addEventListener('click', (e) => {
+$('templates')?.addEventListener('click', (e) => {
   const t = (sel) => e.target.closest(sel);
   let el;
   if ((el = t('.fu-tpl-edit'))) return openTemplateEditor(el.dataset.key);
@@ -900,11 +954,11 @@ $('templates').addEventListener('click', (e) => {
   if (t('.fu-tpl-create')) return createTemplateUI(document.querySelector('.fu-tpl-newform'));
   if (t('.fu-tpl-cancel')) return renderTemplates(state.templates);
 });
-$('templates').addEventListener('change', (e) => {
+$('templates')?.addEventListener('change', (e) => {
   const el = e.target.closest('.fu-tpl-cat');
   if (el) setTemplateCategoryUI(el.dataset.key, el.value);
 });
-$('templates').addEventListener('input', (e) => {
+$('templates')?.addEventListener('input', (e) => {
   if (e.target.classList.contains('fu-tpl-body')) updateTemplateSeg(e.target.closest('[data-tpl]'));
 });
 
@@ -924,7 +978,7 @@ async function load() {
       api('/api/drip/config'),
       api('/api/drip/sequences'),
       api('/api/drip/report'),
-      api('/api/drip/enrollments?status=active'),
+      api('/api/drip/enrollments?status=active' + (PAGE.mode === 'source' ? `&source=${PAGE.source}` : '')),
       api('/api/drip/pause'),
     ]);
     state.cfg = cfg;
@@ -932,20 +986,23 @@ async function load() {
     state.stepStats = report.stepStats || [];
     state.variantStats = report.variantStats || [];
     state.paused = Boolean(pause.paused);
-    renderModeNote();
-    renderStatus();
-    renderStats(report);
-    renderOutcomes(report.outcomes);
-    renderSeqNew();
-    renderSequences();
-    renderTaxonomy(detail.taxonomy);
-    renderTemplates((await api('/api/drip/templates')).templates);
-    renderActive(active.enrollments || []);
-    renderSuppressions((await api('/api/drip/suppressions')).suppressions);
+    if (has('fuNav')) renderNav();
+    if (has('modeNote')) renderModeNote();
+    if (has('statusChips')) renderStatus();
+    if (has('bySource')) renderBySource(report.bySource || []);
+    if (has('srcStats')) renderSrcStats(report.bySource || []);
+    if (has('byStatus')) renderStats(report);
+    if (has('outcomes')) renderOutcomes(report.outcomes);
+    if (has('seqNew')) renderSeqNew();
+    if (has('sequences')) renderSequences();
+    if (has('taxBody')) renderTaxonomy(detail.taxonomy);
+    if (has('templates')) renderTemplates((await api('/api/drip/templates')).templates);
+    if (has('activeBody')) renderActive(active.enrollments || []);
+    if (has('supBody')) renderSuppressions((await api('/api/drip/suppressions')).suppressions);
   } catch (e) {
     showMsg(e.message);
   }
 }
 
-$('btnRefresh').addEventListener('click', load);
+$('btnRefresh')?.addEventListener('click', load);
 load();
