@@ -121,3 +121,86 @@ export async function addSuppression(pool, phone, reason, source) {
   );
   return { status: 'suppressed', phone };
 }
+
+// ---- Sweep DB helpers --------------------------------------------------------
+
+export async function getDue(pool, now = new Date(), limit = 50) {
+  const r = await pool.query(
+    `SELECT id, sequence_id, lead_ref, conversation_id, source, vertical, phone_e164,
+            category_key, time_zone, step, t0_at, attempts, max_messages, expires_at, status
+       FROM drip_enrollment
+      WHERE status = 'active' AND next_due_at IS NOT NULL AND next_due_at <= $1
+      ORDER BY next_due_at
+      LIMIT $2`,
+    [new Date(now).toISOString(), limit],
+  );
+  return r.rows;
+}
+
+export async function getSequence(pool, id) {
+  const r = await pool.query(
+    'SELECT id, max_messages, expires_after_hours, quiet_start_local, quiet_end_local, tz_default, variant_strategy FROM drip_sequence WHERE id = $1',
+    [id],
+  );
+  return r.rows[0] || null;
+}
+
+export async function getSteps(pool, sequenceId) {
+  const r = await pool.query(
+    'SELECT step_index, offset_minutes, is_active FROM drip_step WHERE sequence_id = $1 ORDER BY step_index',
+    [sequenceId],
+  );
+  return r.rows;
+}
+
+export async function isPhoneSuppressed(pool, phone) {
+  return isSuppressed(pool, phone);
+}
+
+// Atomic per-step claim via the delivery log's unique idem_key. Returns true if this call won.
+export async function claimStep(pool, enrollment, idemKey) {
+  const r = await pool.query(
+    `INSERT INTO drip_delivery_log (enrollment_id, lead_ref, step, idem_key, status)
+     VALUES ($1,$2,$3,$4,'sending')
+     ON CONFLICT (idem_key) DO NOTHING
+     RETURNING id`,
+    [enrollment.id, enrollment.lead_ref, enrollment.step, idemKey],
+  );
+  return r.rows.length > 0;
+}
+
+export async function markDelivery(pool, idemKey, { status, providerMessageId = null, errorCode = null } = {}) {
+  await pool.query(
+    'UPDATE drip_delivery_log SET status = $2, provider_message_id = $3, error_code = $4 WHERE idem_key = $1',
+    [idemKey, status, providerMessageId, errorCode],
+  );
+}
+
+export async function exitEnrollment(pool, id, reason) {
+  await pool.query(
+    "UPDATE drip_enrollment SET status = 'exited', exit_reason = $2, updated_at = now() WHERE id = $1",
+    [id, reason],
+  );
+}
+
+export async function deferEnrollment(pool, id, nextDueAt) {
+  await pool.query(
+    'UPDATE drip_enrollment SET next_due_at = $2, updated_at = now() WHERE id = $1',
+    [id, nextDueAt],
+  );
+}
+
+// Apply a post-send outcome: either advance to the next step or complete.
+export async function applyAfterSend(pool, id, after, sentAt = new Date()) {
+  if (after.status === 'completed') {
+    await pool.query(
+      "UPDATE drip_enrollment SET status = 'completed', exit_reason = $2, attempts = attempts + 1, last_message_at = $3, next_due_at = NULL, updated_at = now() WHERE id = $1",
+      [id, after.reason, new Date(sentAt).toISOString()],
+    );
+  } else {
+    await pool.query(
+      'UPDATE drip_enrollment SET step = $2, next_due_at = $3, attempts = attempts + 1, last_message_at = $4, updated_at = now() WHERE id = $1',
+      [id, after.step, after.nextDueAt, new Date(sentAt).toISOString()],
+    );
+  }
+}
