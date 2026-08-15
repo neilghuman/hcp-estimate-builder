@@ -4,7 +4,7 @@
 // SMS-segment / validation logic only for live feedback while typing.
 
 const $ = (id) => document.getElementById(id);
-const state = { cfg: {}, sequences: [], paused: false };
+const state = { cfg: {}, sequences: [], paused: false, stepStats: [], taxonomy: [] };
 const getEditor = () => localStorage.getItem('fu-editor') || '';
 
 function showMsg(text, kind = 'error') {
@@ -79,6 +79,14 @@ function findMessage(id) {
   for (const s of state.sequences) for (const st of s.steps || []) for (const m of st.messages || []) if (String(m.id) === String(id)) return { seq: s, step: st, msg: m };
   return null;
 }
+function findStep(id) {
+  for (const s of state.sequences) for (const st of s.steps || []) if (String(st.id) === String(id)) return { seq: s, step: st };
+  return null;
+}
+function sentFor(seqKey, step) {
+  const row = (state.stepStats || []).find((s) => s.sequence_key === seqKey && Number(s.step) === Number(step));
+  return row ? row.sent : 0;
+}
 
 function renderStatus() {
   const cfg = state.cfg;
@@ -139,13 +147,18 @@ function renderSequences() {
 
     const steps = (seq.steps || []).map((st) => {
       const when = offsetLabel(st.offset_minutes);
+      const sent = sentFor(seq.key, st.step_index);
+      const sentBadge = sent ? `<span class="fu-sent">sent ${esc(sent)}</span>` : '';
+      const stepEdit = state.cfg.editEnabled ? `<button class="fu-btn fu-step-edit" data-step="${esc(st.id)}">⏱ Timing</button>` : '';
       const msgs = (st.messages || []).map((m) => `<div class="fu-msg ${m.category_key != null ? 'cat' : ''}" data-msg="${esc(m.id)}">${msgInnerHTML(m)}</div>`).join('');
       return `
         <div class="fu-step">
-          <div class="fu-step-head">
+          <div class="fu-step-head" data-step-head="${esc(st.id)}">
             <span class="fu-step-idx">${esc(st.step_index)}</span>
             <span class="fu-step-when">${when.t0 ? '<span class="fu-t0">' + when.text + '</span>' : when.text}</span>
             ${st.is_active === false ? '<span class="fu-pill off">step off</span>' : ''}
+            ${sentBadge}
+            ${stepEdit}
           </div>
           ${msgs || '<p class="hint">No message for this step.</p>'}
         </div>`;
@@ -240,6 +253,31 @@ async function togglePause() {
   } catch (e) { showMsg(e.message); }
 }
 
+// ---- Step timing editor ----
+function openStepEditor(id) {
+  const found = findStep(id); if (!found) return;
+  const { step } = found;
+  const head = document.querySelector(`[data-step-head="${id}"]`);
+  head.innerHTML = `
+    <span class="fu-step-idx">${esc(step.step_index)}</span>
+    <label class="fu-step-ed">offset (min from T0) <input type="number" min="0" step="1" class="fu-step-offset" value="${esc(step.offset_minutes)}" /></label>
+    <label class="fu-step-ed"><input type="checkbox" class="fu-step-active" ${step.is_active !== false ? 'checked' : ''}/> active</label>
+    <button class="fu-btn primary fu-step-save" data-step-save="${esc(id)}">Save</button>
+    <button class="fu-btn fu-step-cancel">Cancel</button>`;
+}
+async function saveStep(id, head) {
+  const offsetMinutes = Number(head.querySelector('.fu-step-offset').value);
+  const isActive = head.querySelector('.fu-step-active').checked;
+  if (!Number.isFinite(offsetMinutes) || offsetMinutes < 0) { showMsg('Offset must be 0 or more minutes.'); return; }
+  try {
+    const out = await api(`/api/drip/step/${id}`, { method: 'PUT', body: { offsetMinutes, isActive } });
+    const found = findStep(id);
+    if (found && out.step) { found.step.offset_minutes = out.step.offset_minutes; found.step.is_active = out.step.is_active; }
+    renderSequences();
+    showMsg('Step timing saved.', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
 // Delegated events for the sequences panel.
 $('sequences').addEventListener('click', (e) => {
   const edit = e.target.closest('.fu-edit');
@@ -250,6 +288,12 @@ $('sequences').addEventListener('click', (e) => {
   if (save) return saveMessage(save.dataset.save, save.closest('[data-msg]'));
   const toggle = e.target.closest('.fu-seq-toggle');
   if (toggle) return toggleSequence(toggle.dataset.seq, toggle.dataset.active !== '1');
+  const stepEdit = e.target.closest('.fu-step-edit');
+  if (stepEdit) return openStepEditor(stepEdit.dataset.step);
+  const stepSave = e.target.closest('.fu-step-save');
+  if (stepSave) return saveStep(stepSave.dataset.stepSave, stepSave.closest('[data-step-head]'));
+  const stepCancel = e.target.closest('.fu-step-cancel');
+  if (stepCancel) return renderSequences();
 });
 $('sequences').addEventListener('input', (e) => {
   const ed = e.target.closest('.fu-editor'); if (!ed) return;
@@ -271,8 +315,49 @@ function renderActive(enrollments) {
 }
 
 function renderTaxonomy(taxonomy) {
-  $('taxBody').innerHTML = (taxonomy || []).map((t) => `
-    <tr><td><code>${esc(t.category_key)}</code></td><td>${esc(t.source)}</td><td>${esc(t.raw_value)}</td></tr>`).join('');
+  state.taxonomy = taxonomy || [];
+  const canEdit = state.cfg.editEnabled;
+  $('taxBody').innerHTML = state.taxonomy.map((t) => `
+    <tr>
+      <td><code>${esc(t.category_key)}</code></td><td>${esc(t.source)}</td><td>${esc(t.raw_value)}</td>
+      <td>${canEdit ? `<button class="fu-btn danger fu-tax-del" data-tax="${esc(t.id)}" title="Delete">✕</button>` : ''}</td>
+    </tr>`).join('');
+
+  const add = $('taxAdd');
+  if (!canEdit) { add.hidden = true; return; }
+  add.hidden = false;
+  add.innerHTML = `
+    <input type="text" id="taxKey" placeholder="category_key" />
+    <select id="taxSource"><option value="thumbtack">thumbtack</option><option value="google_lsa">google_lsa</option><option value="any">any</option></select>
+    <input type="text" id="taxRaw" placeholder="raw value (e.g. Tree Stump Grinding)" />
+    <button class="fu-btn primary" id="taxAddBtn">+ Add mapping</button>`;
+  $('taxAddBtn').addEventListener('click', addTaxonomy);
+}
+
+$('taxBody').addEventListener('click', (e) => {
+  const del = e.target.closest('.fu-tax-del');
+  if (del) return deleteTaxonomy(del.dataset.tax);
+});
+
+async function addTaxonomy() {
+  const categoryKey = $('taxKey').value;
+  const source = $('taxSource').value;
+  const rawValue = $('taxRaw').value;
+  try {
+    await api('/api/drip/taxonomy', { method: 'POST', body: { categoryKey, source, rawValue } });
+    const detail = await api('/api/drip/sequences');
+    renderTaxonomy(detail.taxonomy);
+    showMsg('Mapping saved.', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+async function deleteTaxonomy(id) {
+  try {
+    await api(`/api/drip/taxonomy/${id}`, { method: 'DELETE' });
+    state.taxonomy = state.taxonomy.filter((t) => String(t.id) !== String(id));
+    renderTaxonomy(state.taxonomy);
+    showMsg('Mapping removed.', 'success');
+  } catch (e) { showMsg(e.message); }
 }
 
 function renderModeNote() {
@@ -296,6 +381,7 @@ async function load() {
     ]);
     state.cfg = cfg;
     state.sequences = detail.sequences || [];
+    state.stepStats = report.stepStats || [];
     state.paused = Boolean(pause.paused);
     renderModeNote();
     renderStatus();

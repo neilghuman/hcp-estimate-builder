@@ -1,9 +1,10 @@
 // Lead follow-up drip — HTTP routes. Read endpoints are open; enrollment/suppression writes are
 // gated behind DRIP_WRITE_ENABLED (like the intake writes). No sends happen here (future sprint).
 import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, getSequencesDetailed,
-  updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused } from './drip_runtime.js';
+  updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused,
+  addCategoryMap, deleteCategoryMap, updateStep } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
-import { validateMessage, smsSegments } from './drip.js';
+import { validateMessage, smsSegments, validateCategoryMap } from './drip.js';
 import * as cw from './chatwoot.js';
 
 export function registerDripRoutes(app, pool) {
@@ -53,6 +54,33 @@ export function registerDripRoutes(app, pool) {
   app.put('/api/drip/sequence/:id', requireEdit, async (req, res) => {
     try {
       const out = await setSequenceActive(pool, Number(req.params.id), Boolean(req.body?.isActive));
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put('/api/drip/step/:id', requireEdit, async (req, res) => {
+    const { offsetMinutes } = req.body || {};
+    if (offsetMinutes != null && (!Number.isFinite(Number(offsetMinutes)) || Number(offsetMinutes) < 0)) {
+      return res.status(422).json({ error: 'offsetMinutes must be a number >= 0.' });
+    }
+    try {
+      const out = await updateStep(pool, Number(req.params.id), req.body || {});
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/drip/taxonomy', requireEdit, async (req, res) => {
+    const v = validateCategoryMap(req.body || {});
+    if (!v.ok) return res.status(422).json({ error: v.error });
+    try { res.json(await addCategoryMap(pool, v.value)); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/drip/taxonomy/:id', requireEdit, async (req, res) => {
+    try {
+      const out = await deleteCategoryMap(pool, Number(req.params.id));
       if (out.status === 'not_found') return res.status(404).json(out);
       res.json(out);
     } catch (e) { res.status(500).json({ error: e.message }); }
