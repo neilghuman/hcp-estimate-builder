@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   resolveCategoryKey, resolveMessage, renderBody,
-  computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop,
+  computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
 } from '../src/drip.js';
 const MAP = [
   { category_key: 'stump_grinding', source: 'thumbtack', raw_value: 'Tree Stump Grinding and Removal' },
@@ -183,4 +183,24 @@ test('evaluateStop: an agent (untagged) reply after since stops; our tagged drip
   assert.equal(evaluateStop(conv, { since: T0 }), 'human_response');
   const convDripOnly = { ...conv, messages: [conv.messages[0]] };
   assert.equal(evaluateStop(convDripOnly, { since: T0 }), null);
+});
+
+test('nestSequences nests steps + messages, sorts, and keeps category overrides', () => {
+  const seqRows = [{ id: 5, key: 'lsa_landscaping', name: 'LSA (Landscaping)' }];
+  const stepRows = [
+    { id: 20, sequence_id: 5, step_index: 1, offset_minutes: 30, label: null, is_active: true },
+    { id: 10, sequence_id: 5, step_index: 0, offset_minutes: 0, label: 'welcome', is_active: true },
+  ];
+  const msgRows = [
+    { id: 1, step_id: 10, category_key: null, variant: 'A', body: 'welcome', include_optout: true, weight: 1, is_active: true },
+    { id: 2, step_id: 20, category_key: 'stump_grinding', variant: 'A', body: 'stump', include_optout: false, weight: 1, is_active: true },
+    { id: 3, step_id: 20, category_key: null, variant: 'A', body: 'default', include_optout: false, weight: 1, is_active: true },
+  ];
+  const out = nestSequences(seqRows, stepRows, msgRows);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].steps.map((s) => s.step_index), [0, 1]); // sorted by step_index
+  const step1 = out[0].steps.find((s) => s.step_index === 1);
+  assert.equal(step1.messages.length, 2);
+  assert.equal(step1.messages[0].category_key, null);          // default sorts before category
+  assert.equal(step1.messages[1].category_key, 'stump_grinding');
 });
