@@ -3,6 +3,7 @@
 // message resolution, and reporting. The sweep/send path is gated and added in a later sprint.
 import {
   resolveMessage, resolveCategoryKey, computeNextDueAt, applyQuietHours, nestSequences,
+  autoreplySource, pickAutoreplyTemplate,
 } from './drip.js';
 export function dripConfig() {
   const flag = (v, def) => String(process.env[v] ?? def).toLowerCase();
@@ -391,7 +392,7 @@ export async function deleteStep(pool, id) {
 
 export async function getTemplates(pool) {
   const r = await pool.query(
-    'SELECT id, template_key, group_key, sub_key, label, body, version, updated_by, updated_at FROM drip_template ORDER BY group_key, sub_key',
+    'SELECT id, template_key, group_key, sub_key, category_key, label, body, version, updated_by, updated_at FROM drip_template ORDER BY group_key, sub_key',
   );
   return r.rows;
 }
@@ -402,6 +403,30 @@ export async function getTemplateGroup(pool, group) {
   const map = {};
   for (const row of r.rows) map[row.sub_key] = row.body;
   return map;
+}
+
+// Resolve a group's auto-reply message for a raw lead category, via the SAME drip_category_map
+// taxonomy the drip sequences use. Falls back to the group's 'generic' sub when unmatched.
+export async function resolveAutoreply(pool, group, rawCategory) {
+  const source = autoreplySource(group);
+  const mapRes = source
+    ? await pool.query('SELECT category_key, source, raw_value FROM drip_category_map WHERE source = $1', [source])
+    : { rows: [] };
+  const categoryKey = resolveCategoryKey(mapRes.rows, source, rawCategory);
+  const rowsRes = await pool.query(
+    'SELECT sub_key, category_key, label, body FROM drip_template WHERE group_key = $1',
+    [group],
+  );
+  const { row, matched } = pickAutoreplyTemplate(rowsRes.rows, categoryKey);
+  return {
+    group,
+    source,
+    categoryKey,
+    matched,
+    subKey: row ? row.sub_key : null,
+    label: row ? row.label : null,
+    body: row ? row.body : null,
+  };
 }
 
 // Idempotent seed/populate (used by the one-time populate-from-n8n script). Does NOT overwrite an

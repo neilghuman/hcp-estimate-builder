@@ -293,3 +293,21 @@ export function validateTemplateBody(body) {
   return { ok: true, value: String(body) };
 }
 
+// Which lead source an auto-reply group's category text should resolve against, from the group key.
+export function autoreplySource(group) {
+  const g = String(group || '');
+  if (g.startsWith('autoreply_tt_')) return 'thumbtack';
+  if (g.startsWith('autoreply_lsa_')) return 'google_lsa';
+  return null;
+}
+
+// Pick the template row for a resolved category_key, falling back to the group's default sub.
+export function pickAutoreplyTemplate(rows = [], categoryKey = null, { fallbackSub = 'generic' } = {}) {
+  if (categoryKey) {
+    const hit = rows.find((r) => r.category_key === categoryKey);
+    if (hit) return { row: hit, matched: true };
+  }
+  const fb = rows.find((r) => r.sub_key === fallbackSub);
+  return { row: fb || null, matched: false };
+}
+

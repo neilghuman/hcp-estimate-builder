@@ -719,9 +719,10 @@ function renderTemplates(list) {
       const ver = t.version ? `<span class="fu-ver">v${esc(t.version)}</span>` : '';
       const versionsBtn = (canEdit && Number(t.version) > 1) ? `<button class="fu-btn fu-tpl-versions" data-key="${esc(t.template_key)}">🕘 Versions</button>` : '';
       const editBtn = canEdit ? `<button class="fu-btn fu-tpl-edit" data-key="${esc(t.template_key)}">✎ Edit</button>` : '';
+      const cat = t.category_key ? ` <span class="fu-cat" title="Selected when a lead resolves to this category">🏷️ ${esc(t.category_key)}</span>` : '';
       return `
         <div class="fu-msg" data-tpl="${esc(t.template_key)}">
-          <div class="fu-msg-label">${esc(t.label || t.sub_key)} <code>${esc(t.sub_key)}</code>${ver} <span class="fu-ver">${seg.segments} seg</span></div>
+          <div class="fu-msg-label">${esc(t.label || t.sub_key)} <code>${esc(t.sub_key)}</code>${cat}${ver} <span class="fu-ver">${seg.segments} seg</span></div>
           <div class="fu-msg-text">${esc(t.body)}</div>
           ${(editBtn || versionsBtn) ? `<div class="fu-msg-actions">${editBtn}${versionsBtn}</div>` : ''}
         </div>`;

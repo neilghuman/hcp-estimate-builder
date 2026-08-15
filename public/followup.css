@@ -113,6 +113,7 @@
 
 .fu-msg-actions { margin-top: 0.35rem; display: flex; gap: 0.4rem; }
 .fu-ver { font-size: 0.7rem; color: var(--muted); margin-left: 0.4rem; }
+.fu-cat { font-size: 0.7rem; color: var(--fu-accent); margin-left: 0.4rem; border: 1px solid var(--border-soft); border-radius: 999px; padding: 0 0.4rem; }
 
 .fu-editor { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.5rem; }
 .fu-ed-body {
