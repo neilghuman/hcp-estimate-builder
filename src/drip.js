@@ -274,3 +274,16 @@ export function validateSequenceSettings(patch = {}) {
   return { ok: true, value: out };
 }
 
+// Validate + normalize a new sequence's identity fields (settings validated separately).
+export function validateSequenceCreate({ key, name, source, vertical } = {}) {
+  const k = String(key || '').trim().toLowerCase();
+  const nm = String(name || '').trim();
+  const src = String(source || '').trim().toLowerCase();
+  if (!k) return { ok: false, error: 'Sequence key is required.' };
+  if (!/^[a-z0-9_]+$/.test(k)) return { ok: false, error: 'Sequence key may only contain lowercase letters, numbers, and underscores.' };
+  if (!nm) return { ok: false, error: 'Sequence name is required.' };
+  if (!TAXONOMY_SOURCES.includes(src)) return { ok: false, error: `Source must be one of: ${TAXONOMY_SOURCES.join(', ')}.` };
+  const vert = String(vertical || '').trim().toLowerCase() || null;
+  return { ok: true, value: { key: k, name: nm, source: src, vertical: vert } };
+}
+

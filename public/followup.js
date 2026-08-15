@@ -176,6 +176,7 @@ function renderSequences() {
       const sentBadge = sent ? `<span class="fu-sent">sent ${esc(sent)}</span>` : '';
       const stepEdit = state.cfg.editEnabled ? `<button class="fu-btn fu-step-edit" data-step="${esc(st.id)}">⏱ Timing</button>` : '';
       const addCat = state.cfg.editEnabled ? `<button class="fu-btn fu-add-cat" data-add-cat="${esc(st.id)}">＋ Category copy</button>` : '';
+      const delStep = state.cfg.editEnabled ? `<button class="fu-btn danger fu-step-del" data-step-del="${esc(st.id)}" title="Delete this step">🗑</button>` : '';
       const msgs = (st.messages || []).map((m) => `<div class="fu-msg ${m.category_key != null ? 'cat' : ''}" data-msg="${esc(m.id)}">${msgInnerHTML(m, seq.key, st.step_index)}</div>`).join('');
       return `
         <div class="fu-step">
@@ -186,12 +187,14 @@ function renderSequences() {
             ${sentBadge}
             ${stepEdit}
             ${addCat}
+            ${delStep}
           </div>
           ${msgs || '<p class="hint">No message for this step.</p>'}
         </div>`;
     }).join('');
 
     const settingsBtn = state.cfg.editEnabled ? `<button class="fu-btn fu-seq-settings" data-seq-settings="${esc(seq.id)}">⚙ Settings</button>` : '';
+    const addStepBtn = state.cfg.editEnabled ? `<button class="fu-btn fu-seq-add-step" data-seq-add-step="${esc(seq.id)}">＋ Step</button>` : '';
     return `
       <div class="fu-seq">
         <div class="fu-seq-head">
@@ -200,9 +203,10 @@ function renderSequences() {
           <code>${esc(seq.key)}</code>
           ${toggle}
           ${settingsBtn}
+          ${addStepBtn}
         </div>
         <div class="fu-seq-head fu-seq-meta" data-seq-meta="${esc(seq.id)}">${meta}</div>
-        <div class="fu-steps">${steps}</div>
+        <div class="fu-steps" data-seq-steps="${esc(seq.id)}">${steps}</div>
       </div>`;
   }).join('');
 }
@@ -315,6 +319,95 @@ async function reloadSequences() {
   const detail = await api('/api/drip/sequences');
   state.sequences = detail.sequences || [];
   renderSequences();
+}
+
+// ---- Sequence + step builder ----
+function renderSeqNew() {
+  const el = $('seqNew');
+  if (!state.cfg.editEnabled) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = '<button class="fu-btn primary" id="btnNewSeq">＋ New sequence</button>';
+  $('btnNewSeq').addEventListener('click', openNewSequence);
+}
+
+function openNewSequence() {
+  const strat = ['random', 'round_robin', 'weighted_ab'].map((s) => `<option value="${s}">${s}</option>`).join('');
+  $('seqNew').innerHTML = `
+    <div class="fu-seq-settings fu-newseq">
+      <label>Key <input type="text" class="ns-key" placeholder="thumbtack_landscaping" /></label>
+      <label>Name <input type="text" class="ns-name" placeholder="Thumbtack (Landscaping)" /></label>
+      <label>Source <select class="ns-source"><option value="thumbtack">thumbtack</option><option value="google_lsa">google_lsa</option><option value="any">any</option></select></label>
+      <label>Vertical <input type="text" class="ns-vertical" placeholder="landscaping" /></label>
+      <label>Max msgs <input type="number" min="1" max="20" class="ns-max" value="7" /></label>
+      <label>Quiet start <input type="time" class="ns-qs" value="08:00" /></label>
+      <label>Quiet end <input type="time" class="ns-qe" value="20:00" /></label>
+      <label>Expiry hrs <input type="number" min="1" max="720" class="ns-exp" value="168" /></label>
+      <label>Variants <select class="ns-strat">${strat}</select></label>
+      <button class="fu-btn primary" id="btnCreateSeq">Create (inactive)</button>
+      <button class="fu-btn" id="btnCancelSeq">Cancel</button>
+    </div>
+    <p class="hint">New sequences start <strong>inactive</strong> and empty — add steps, then activate. Enrolling leads into it also needs an n8n hook for that source.</p>`;
+  $('btnCreateSeq').addEventListener('click', saveNewSequence);
+  $('btnCancelSeq').addEventListener('click', renderSeqNew);
+}
+
+async function saveNewSequence() {
+  const el = $('seqNew');
+  const g = (c) => el.querySelector(c).value.trim();
+  const body = {
+    key: g('.ns-key'), name: g('.ns-name'), source: el.querySelector('.ns-source').value, vertical: g('.ns-vertical') || undefined,
+    maxMessages: Number(el.querySelector('.ns-max').value), quietStart: el.querySelector('.ns-qs').value,
+    quietEnd: el.querySelector('.ns-qe').value, expiresAfterHours: Number(el.querySelector('.ns-exp').value),
+    variantStrategy: el.querySelector('.ns-strat').value, changedBy: getEditor() || undefined,
+  };
+  try {
+    await api('/api/drip/sequence', { method: 'POST', body });
+    await load();
+    showMsg(`Sequence "${body.key}" created (inactive).`, 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+function openAddStep(seqId) {
+  const seq = state.sequences.find((s) => String(s.id) === String(seqId)); if (!seq) return;
+  const nextIdx = (seq.steps || []).reduce((mx, s) => Math.max(mx, Number(s.step_index)), -1) + 1;
+  const stepsDiv = document.querySelector(`[data-seq-steps="${seqId}"]`);
+  const wrap = document.createElement('div');
+  wrap.className = 'fu-step fu-addstep-host';
+  wrap.innerHTML = `
+    <div class="fu-step-editor">
+      <label class="fu-step-ed">Step # <input type="number" min="0" class="as-idx" value="${esc(nextIdx)}" /></label>
+      <label class="fu-step-ed">offset (min from T0) <input type="number" min="0" class="as-offset" value="0" /></label>
+      <label class="fu-step-ed"><input type="checkbox" class="as-optout" /> opt-out</label>
+      <textarea class="fu-ed-body as-body" placeholder="Default message body (uses {name}, {service}, {Business})"></textarea>
+      <div class="fu-msg-actions">
+        <button class="fu-btn primary fu-addstep-save" data-addstep-seq="${esc(seqId)}">Add step</button>
+        <button class="fu-btn fu-step-cancel">Cancel</button>
+      </div>
+    </div>`;
+  stepsDiv.appendChild(wrap);
+  wrap.querySelector('.as-body').focus();
+}
+
+async function saveAddStep(btn, node) {
+  const sequenceId = Number(btn.dataset.addstepSeq);
+  const stepIndex = Number(node.querySelector('.as-idx').value);
+  const offsetMinutes = Number(node.querySelector('.as-offset').value);
+  const includeOptout = node.querySelector('.as-optout').checked;
+  const body = node.querySelector('.as-body').value.trim();
+  if (!body) { showMsg('Enter the default message body for the step.'); return; }
+  try {
+    await api('/api/drip/step', { method: 'POST', body: { sequenceId, stepIndex, offsetMinutes, body, includeOptout, changedBy: getEditor() || undefined } });
+    await reloadSequences();
+    showMsg(`Step ${stepIndex} added.`, 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+async function deleteStepUI(id) {
+  try {
+    await api(`/api/drip/step/${id}`, { method: 'DELETE' });
+    await reloadSequences();
+    showMsg('Step removed.', 'success');
+  } catch (e) { showMsg(e.message); }
 }
 
 async function saveMessage(id, node) {
@@ -483,6 +576,9 @@ $('sequences').addEventListener('click', (e) => {
   if (t('.fu-cancel')) return renderSequences();
   if ((el = t('.fu-seq-toggle'))) return toggleSequence(el.dataset.seq, el.dataset.active !== '1');
   if ((el = t('.fu-seq-settings'))) return openSeqSettings(el.dataset.seqSettings);
+  if ((el = t('.fu-seq-add-step'))) return openAddStep(el.dataset.seqAddStep);
+  if ((el = t('.fu-addstep-save'))) return saveAddStep(el, el.closest('.fu-step'));
+  if ((el = t('.fu-step-del'))) return deleteStepUI(el.dataset.stepDel);
   if ((el = t('.fu-seq-set-save'))) return saveSeqSettings(el.dataset.seqSetSave, el.closest('[data-seq-meta]'));
   if (t('.fu-seq-set-cancel')) return renderSequences();
   if ((el = t('.fu-step-edit'))) return openStepEditor(el.dataset.step);
@@ -637,6 +733,7 @@ async function load() {
     renderStatus();
     renderStats(report);
     renderOutcomes(report.outcomes);
+    renderSeqNew();
     renderSequences();
     renderTaxonomy(detail.taxonomy);
     renderActive(active.enrollments || []);
