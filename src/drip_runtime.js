@@ -124,6 +124,19 @@ export async function addSuppression(pool, phone, reason, source) {
   return { status: 'suppressed', phone };
 }
 
+export async function getSuppressions(pool, limit = 500) {
+  const r = await pool.query(
+    'SELECT phone_e164, reason, source, created_at FROM drip_suppression ORDER BY created_at DESC LIMIT $1',
+    [limit],
+  );
+  return r.rows;
+}
+
+export async function removeSuppression(pool, phone) {
+  const r = await pool.query('DELETE FROM drip_suppression WHERE phone_e164 = $1 RETURNING phone_e164', [phone]);
+  return r.rows[0] ? { status: 'removed', phone: r.rows[0].phone_e164 } : { status: 'not_found' };
+}
+
 // ---- Sweep DB helpers --------------------------------------------------------
 
 export async function getDue(pool, now = new Date(), limit = 50) {
@@ -292,6 +305,14 @@ export async function deleteMessage(pool, id) {
   if (siblings.rows[0].n <= 1) return { status: 'last_in_group' };
   await pool.query('DELETE FROM drip_message WHERE id = $1', [id]);
   return { status: 'deleted', id };
+}
+
+// Revert a message's body to a historical version. This is itself a versioned edit: the current
+// body is archived and the version bumps (so revert is undoable).
+export async function revertMessage(pool, id, version, changedBy) {
+  const h = (await pool.query('SELECT body FROM drip_message_history WHERE message_id = $1 AND version = $2', [id, version])).rows[0];
+  if (!h) return { status: 'version_not_found' };
+  return updateMessage(pool, id, { body: h.body, changedBy });
 }
 
 // Update sequence settings (partial). Accepts normalized fields from validateSequenceSettings.

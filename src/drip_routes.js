@@ -2,7 +2,8 @@
 // gated behind DRIP_WRITE_ENABLED (like the intake writes). No sends happen here (future sprint).
 import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, getSequencesDetailed,
   updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused,
-  addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence } from './drip_runtime.js';
+  addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence,
+  revertMessage, getSuppressions, removeSuppression } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
 import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings } from './drip.js';
 import * as cw from './chatwoot.js';
@@ -34,6 +35,32 @@ export function registerDripRoutes(app, pool) {
   app.get('/api/drip/message/:id/history', async (req, res) => {
     try { res.json({ history: await getMessageHistory(pool, Number(req.params.id)) }); }
     catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/drip/message/:id/revert', requireEdit, async (req, res) => {
+    const version = Number(req.body?.version);
+    if (!Number.isInteger(version)) return res.status(422).json({ error: 'A numeric version is required.' });
+    try {
+      const out = await revertMessage(pool, Number(req.params.id), version, req.body?.changedBy);
+      if (out.status === 'version_not_found') return res.status(404).json({ error: `Version ${version} not found for this message.` });
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/drip/suppressions', async (_req, res) => {
+    try { res.json({ suppressions: await getSuppressions(pool) }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/drip/suppress', requireEdit, async (req, res) => {
+    const phone = req.body?.phone || req.query?.phone;
+    if (!phone) return res.status(400).json({ error: 'phone required' });
+    try {
+      const out = await removeSuppression(pool, String(phone));
+      if (out.status === 'not_found') return res.status(404).json(out);
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   app.put('/api/drip/message/:id', requireEdit, async (req, res) => {
@@ -142,8 +169,7 @@ export function registerDripRoutes(app, pool) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.post('/api/drip/suppress', async (req, res) => {
-    if (!dripConfig().writeEnabled) return res.status(403).json({ error: 'DRIP_WRITE_ENABLED is off' });
+  app.post('/api/drip/suppress', requireEdit, async (req, res) => {
     const { phone, reason, source } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone required' });
     try { res.json(await addSuppression(pool, phone, reason, source)); }

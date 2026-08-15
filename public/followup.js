@@ -4,7 +4,7 @@
 // SMS-segment / validation logic only for live feedback while typing.
 
 const $ = (id) => document.getElementById(id);
-const state = { cfg: {}, sequences: [], paused: false, stepStats: [], taxonomy: [] };
+const state = { cfg: {}, sequences: [], paused: false, stepStats: [], taxonomy: [], suppressions: [] };
 const getEditor = () => localStorage.getItem('fu-editor') || '';
 
 function showMsg(text, kind = 'error') {
@@ -144,9 +144,12 @@ function msgInnerHTML(m) {
   const inactive = m.is_active === false ? ' <span class="fu-pill off">off</span>' : '';
   const ver = m.version ? `<span class="fu-ver">v${esc(m.version)}</span>` : '';
   const wt = Number(m.weight) > 1 ? `<span class="fu-ver">weight ${esc(m.weight)}</span>` : '';
+  const versionsBtn = (state.cfg.editEnabled && Number(m.version) > 1)
+    ? `<button class="fu-btn fu-versions" data-versions="${esc(m.id)}">🕘 Versions</button>` : '';
   const actions = state.cfg.editEnabled ? `<div class="fu-msg-actions">
     <button class="fu-btn fu-edit" data-edit="${esc(m.id)}">✎ Edit</button>
     <button class="fu-btn fu-add-variant" data-add-variant="${esc(m.id)}">＋ Variant</button>
+    ${versionsBtn}
     <button class="fu-btn danger fu-msg-del" data-del="${esc(m.id)}" title="Delete this message">🗑</button>
   </div>` : '';
   return `<div class="fu-msg-label">${label}${optout}${inactive}${ver}${wt}</div><div class="fu-msg-text">${esc(m.body)}</div>${actions}`;
@@ -315,6 +318,34 @@ async function deleteMessageUI(id) {
   } catch (e) { showMsg(e.message); }
 }
 
+// ---- Message version history + revert ----
+async function openHistory(id) {
+  const node = document.querySelector(`[data-msg="${id}"]`);
+  try {
+    const { history } = await api(`/api/drip/message/${id}/history`);
+    const rows = (history || []).map((h) => `
+      <div class="fu-hist-row">
+        <div class="fu-hist-meta">v${esc(h.version)} · ${esc(h.changed_by || 'unknown')} · ${fmtDue(h.changed_at)}</div>
+        <div class="fu-hist-body">${esc(h.body)}</div>
+        <button class="fu-btn fu-revert" data-revert="${esc(id)}" data-version="${esc(h.version)}">↩ Revert to v${esc(h.version)}</button>
+      </div>`).join('');
+    node.innerHTML = `
+      <div class="fu-history">
+        <div class="fu-msg-label">Version history</div>
+        ${rows || '<p class="hint">No prior versions.</p>'}
+        <div class="fu-msg-actions"><button class="fu-btn fu-cancel">Close</button></div>
+      </div>`;
+  } catch (e) { showMsg(e.message); }
+}
+
+async function revertMessageUI(id, version) {
+  try {
+    const out = await api(`/api/drip/message/${id}/revert`, { method: 'POST', body: { version: Number(version), changedBy: getEditor() || undefined } });
+    await reloadSequences();
+    showMsg(`Reverted to v${version} (now v${out.message.version}).`, 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
 async function toggleSequence(id, makeActive) {
   try {
     const out = await api(`/api/drip/sequence/${id}`, { method: 'PUT', body: { isActive: makeActive } });
@@ -405,6 +436,8 @@ $('sequences').addEventListener('click', (e) => {
   let el;
   if ((el = t('.fu-edit'))) return openEditor(el.dataset.edit);
   if ((el = t('.fu-add-variant'))) return openAddVariant(el.dataset.addVariant);
+  if ((el = t('.fu-versions'))) return openHistory(el.dataset.versions);
+  if ((el = t('.fu-revert'))) return revertMessageUI(el.dataset.revert, el.dataset.version);
   if ((el = t('.fu-msg-del'))) return deleteMessageUI(el.dataset.del);
   if ((el = t('.fu-save'))) return saveMessage(el.dataset.save, el.closest('.fu-msg'));
   if ((el = t('.fu-add-save'))) return saveNewMessage(el, el.closest('.fu-msg'));
@@ -482,6 +515,60 @@ async function deleteTaxonomy(id) {
   } catch (e) { showMsg(e.message); }
 }
 
+// ---- Suppression manager ----
+function renderSuppressions(list) {
+  state.suppressions = list || [];
+  const canEdit = state.cfg.editEnabled;
+  const body = $('supBody');
+  $('supEmpty').hidden = state.suppressions.length > 0;
+  body.innerHTML = state.suppressions.map((s) => `
+    <tr>
+      <td><code>${esc(s.phone_e164)}</code></td>
+      <td>${esc(s.reason || '—')}</td>
+      <td>${esc(s.source || '—')}</td>
+      <td>${fmtDue(s.created_at)}</td>
+      <td>${canEdit ? `<button class="fu-btn danger fu-sup-del" data-phone="${esc(s.phone_e164)}" title="Remove">✕</button>` : ''}</td>
+    </tr>`).join('');
+
+  const add = $('supAdd');
+  if (!canEdit) { add.hidden = true; return; }
+  add.hidden = false;
+  add.innerHTML = `
+    <input type="text" id="supPhone" placeholder="+1XXXXXXXXXX" />
+    <input type="text" id="supReason" placeholder="reason (optional)" />
+    <button class="fu-btn primary" id="supAddBtn">+ Suppress number</button>`;
+  $('supAddBtn').addEventListener('click', addSuppressionUI);
+}
+
+$('supBody').addEventListener('click', (e) => {
+  const del = e.target.closest('.fu-sup-del');
+  if (del) return deleteSuppressionUI(del.dataset.phone);
+});
+
+async function addSuppressionUI() {
+  const phone = $('supPhone').value.trim();
+  const reason = $('supReason').value.trim();
+  if (!phone) { showMsg('Enter a phone number.'); return; }
+  try {
+    await api('/api/drip/suppress', { method: 'POST', body: { phone, reason: reason || undefined, source: 'dashboard' } });
+    await reloadSuppressions();
+    showMsg('Number suppressed.', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+async function deleteSuppressionUI(phone) {
+  try {
+    await api('/api/drip/suppress', { method: 'DELETE', body: { phone } });
+    await reloadSuppressions();
+    showMsg('Number removed from suppression.', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+async function reloadSuppressions() {
+  const { suppressions } = await api('/api/drip/suppressions');
+  renderSuppressions(suppressions);
+}
+
 function renderModeNote() {
   const el = $('modeNote');
   if (state.cfg.editEnabled) {
@@ -512,6 +599,7 @@ async function load() {
     renderSequences();
     renderTaxonomy(detail.taxonomy);
     renderActive(active.enrollments || []);
+    renderSuppressions((await api('/api/drip/suppressions')).suppressions);
   } catch (e) {
     showMsg(e.message);
   }
