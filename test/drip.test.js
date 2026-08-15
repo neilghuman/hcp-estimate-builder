@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   resolveCategoryKey, resolveMessage, renderBody,
   computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
+  smsSegments, validateMessage,
 } from '../src/drip.js';
 const MAP = [
   { category_key: 'stump_grinding', source: 'thumbtack', raw_value: 'Tree Stump Grinding and Removal' },
@@ -203,4 +204,42 @@ test('nestSequences nests steps + messages, sorts, and keeps category overrides'
   assert.equal(step1.messages.length, 2);
   assert.equal(step1.messages[0].category_key, null);          // default sorts before category
   assert.equal(step1.messages[1].category_key, 'stump_grinding');
+});
+
+test('smsSegments: GSM-7 single vs multi segment', () => {
+  assert.deepEqual(smsSegments(''), { encoding: 'GSM-7', units: 0, segments: 0, perSegment: 160, remaining: 160 });
+  const short = smsSegments('Hi there, quick follow-up.');
+  assert.equal(short.encoding, 'GSM-7');
+  assert.equal(short.segments, 1);
+  const long = smsSegments('a'.repeat(200));
+  assert.equal(long.segments, 2);
+  assert.equal(long.perSegment, 153);
+});
+
+test('smsSegments: non-GSM char forces UCS-2', () => {
+  const r = smsSegments('Hi 🌳 tree'); // emoji is not GSM-7
+  assert.equal(r.encoding, 'UCS-2');
+  assert.equal(r.segments, 1);
+});
+
+test('validateMessage: empty is an error', () => {
+  const issues = validateMessage('   ', { includeOptout: false });
+  assert.equal(issues[0].code, 'empty');
+  assert.equal(issues[0].level, 'error');
+});
+
+test('validateMessage: opt-out flag without STOP is an error', () => {
+  const issues = validateMessage('Hi {name}, want a call?', { includeOptout: true });
+  assert.ok(issues.some((i) => i.code === 'optout_missing' && i.level === 'error'));
+});
+
+test('validateMessage: STOP without flag warns; unknown placeholder warns', () => {
+  const issues = validateMessage('Hi {name}, reply STOP to opt out. {foo}', { includeOptout: false });
+  assert.ok(issues.some((i) => i.code === 'optout_mismatch' && i.level === 'warn'));
+  assert.ok(issues.some((i) => i.code === 'placeholder' && i.level === 'warn'));
+});
+
+test('validateMessage: clean opt-out message has no errors', () => {
+  const issues = validateMessage('Hi {name}, reply STOP to opt out.', { includeOptout: true });
+  assert.equal(issues.filter((i) => i.level === 'error').length, 0);
 });

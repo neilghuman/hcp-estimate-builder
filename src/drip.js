@@ -128,12 +128,14 @@ export function nestSequences(seqRows = [], stepRows = [], msgRows = []) {
   for (const m of msgRows) {
     const arr = msgByStep.get(m.step_id) || [];
     arr.push({
+      id: m.id,
       category_key: m.category_key ?? null,
       variant: m.variant,
       body: m.body,
       include_optout: m.include_optout,
       weight: m.weight,
       is_active: m.is_active,
+      version: m.version,
     });
     msgByStep.set(m.step_id, arr);
   }
@@ -158,5 +160,66 @@ export function nestSequences(seqRows = [], stepRows = [], msgRows = []) {
     ...q,
     steps: (stepsBySeq.get(q.id) || []).sort((a, b) => a.step_index - b.step_index),
   }));
+}
+
+// ---- SMS segmentation + message validation (dashboard editing) ----------------
+
+// GSM 03.38 basic character set (each = 1 septet) and extension set (each = 2 septets).
+const GSM_BASIC = new Set(
+  ('@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡'
+    + 'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà').split(''),
+);
+const GSM_EXT = new Set('^{}\\[~]|€'.split(''));
+
+// Estimate SMS encoding + segment count for a body. Placeholders ({name}) are counted literally,
+// so the real length shifts slightly at send — treated as an estimate in the UI.
+export function smsSegments(text) {
+  const s = String(text || '');
+  const chars = Array.from(s);
+  let gsm = true;
+  let septets = 0;
+  for (const c of chars) {
+    if (GSM_BASIC.has(c)) { septets += 1; }
+    else if (GSM_EXT.has(c)) { septets += 2; }
+    else { gsm = false; break; }
+  }
+  if (gsm) {
+    const units = septets;
+    const segments = units === 0 ? 0 : (units <= 160 ? 1 : Math.ceil(units / 153));
+    const perSegment = segments <= 1 ? 160 : 153;
+    return { encoding: 'GSM-7', units, segments, perSegment, remaining: segments === 0 ? 160 : segments * perSegment - units };
+  }
+  const units = chars.length; // UCS-2 counts code points here (close enough for estimate)
+  const segments = units === 0 ? 0 : (units <= 70 ? 1 : Math.ceil(units / 67));
+  const perSegment = segments <= 1 ? 70 : 67;
+  return { encoding: 'UCS-2', units, segments, perSegment, remaining: segments === 0 ? 70 : segments * perSegment - units };
+}
+
+// Validate a message body against opt-out/quality rules. Returns [{ level, code, message }].
+// level 'error' should block a save; 'warn' is advisory.
+export function validateMessage(body, { includeOptout = false } = {}) {
+  const issues = [];
+  const text = String(body || '');
+  const trimmed = text.trim();
+  if (!trimmed) {
+    issues.push({ level: 'error', code: 'empty', message: 'Message body cannot be empty.' });
+    return issues;
+  }
+  const hasStop = /\bstop\b/i.test(text);
+  if (includeOptout && !hasStop) {
+    issues.push({ level: 'error', code: 'optout_missing', message: 'This message is marked as carrying an opt-out, but the body has no "STOP" instruction.' });
+  }
+  if (!includeOptout && hasStop) {
+    issues.push({ level: 'warn', code: 'optout_mismatch', message: 'Body mentions "STOP" but the opt-out flag is off — set the flag so it is tracked as a consent message.' });
+  }
+  const { segments } = smsSegments(text);
+  if (segments >= 3) {
+    issues.push({ level: 'warn', code: 'long', message: `This is ${segments} SMS segments — consider shortening to keep it to 1–2.` });
+  }
+  const unknown = (text.match(/\{(\w+)\}/g) || []).filter((p) => !['{name}', '{service}', '{Business}'].includes(p));
+  if (unknown.length) {
+    issues.push({ level: 'warn', code: 'placeholder', message: `Unknown placeholder(s): ${[...new Set(unknown)].join(', ')}. Only {name}, {service}, {Business} are substituted.` });
+  }
+  return issues;
 }
 

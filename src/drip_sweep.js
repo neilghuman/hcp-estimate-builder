@@ -5,7 +5,7 @@
 import { evaluateStop, applyQuietHours, computeNextDueAt, buildIdemKey, resolveMessage, renderBody } from './drip.js';
 import {
   getDue, getSequence, getSteps, isPhoneSuppressed, claimStep, markDelivery,
-  exitEnrollment, deferEnrollment, applyAfterSend,
+  exitEnrollment, deferEnrollment, applyAfterSend, isDripPaused,
 } from './drip_runtime.js';
 
 function quietOpts(enrollment, sequence) {
@@ -65,6 +65,8 @@ async function resolveMessageFor(pool, enrollment) {
 // Process all due enrollments once. chatwoot adapter: { getSnapshot, send, removeLabel }.
 // dryRun=true evaluates + reports without any Chatwoot write or DB mutation.
 export async function sweepOnce(pool, { chatwoot, now = new Date(), dryRun = false, limit = 50 } = {}) {
+  // Global runtime pause is a dashboard kill switch; a real (sending) sweep no-ops while paused.
+  if (!dryRun && await isDripPaused(pool)) return [{ action: 'paused' }];
   const due = await getDue(pool, now, limit);
   const results = [];
   for (const e of due) {

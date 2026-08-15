@@ -10,6 +10,7 @@ export function dripConfig() {
     enabled: flag('DRIP_ENABLED', 'true') !== 'false',      // routes visible
     writeEnabled: flag('DRIP_WRITE_ENABLED', 'false') === 'true', // enrollment writes
     sendEnabled: flag('DRIP_SEND_ENABLED', 'false') === 'true',   // real sends (future sprint)
+    editEnabled: flag('DRIP_CONFIG_EDIT_ENABLED', 'false') === 'true', // dashboard config editing
   };
 }
 
@@ -215,7 +216,7 @@ export async function getSequencesDetailed(pool) {
     'SELECT id, sequence_id, step_index, offset_minutes, label, is_active FROM drip_step ORDER BY sequence_id, step_index',
   );
   const msgs = await pool.query(
-    `SELECT id, step_id, category_key, variant, body, include_optout, weight, is_active
+    `SELECT id, step_id, category_key, variant, body, include_optout, weight, is_active, version
        FROM drip_message ORDER BY step_id, category_key NULLS FIRST, variant`,
   );
   const taxonomy = await pool.query(
@@ -225,4 +226,67 @@ export async function getSequencesDetailed(pool) {
     sequences: nestSequences(seq.rows, steps.rows, msgs.rows),
     taxonomy: taxonomy.rows,
   };
+}
+
+// ---- Config editing (dashboard, gated) ---------------------------------------
+
+// Update a single message. A body change is versioned: the prior body is copied to
+// drip_message_history and the version bumps. Flag-only changes do not bump the version.
+export async function updateMessage(pool, id, { body, includeOptout, isActive, changedBy } = {}) {
+  const cur = (await pool.query('SELECT id, body, include_optout, is_active, version FROM drip_message WHERE id = $1', [id])).rows[0];
+  if (!cur) return { status: 'not_found' };
+
+  const nextBody = body != null ? String(body) : cur.body;
+  const bodyChanged = body != null && nextBody !== cur.body;
+  const nextOptout = includeOptout != null ? Boolean(includeOptout) : cur.include_optout;
+  const nextActive = isActive != null ? Boolean(isActive) : cur.is_active;
+
+  if (bodyChanged) {
+    await pool.query(
+      'INSERT INTO drip_message_history (message_id, body, version, changed_by) VALUES ($1,$2,$3,$4)',
+      [id, cur.body, cur.version, changedBy || 'dashboard'],
+    );
+  }
+  const nextVersion = bodyChanged ? Number(cur.version) + 1 : cur.version;
+  const upd = await pool.query(
+    `UPDATE drip_message
+        SET body = $2, include_optout = $3, is_active = $4, version = $5,
+            updated_by = $6, updated_at = now()
+      WHERE id = $1
+      RETURNING id, step_id, category_key, variant, body, include_optout, weight, is_active, version, updated_by`,
+    [id, nextBody, nextOptout, nextActive, nextVersion, changedBy || 'dashboard'],
+  );
+  return { status: 'updated', message: upd.rows[0], versioned: bodyChanged };
+}
+
+// Message version history (newest first), for revert.
+export async function getMessageHistory(pool, id) {
+  const r = await pool.query(
+    'SELECT id, body, version, changed_by, changed_at FROM drip_message_history WHERE message_id = $1 ORDER BY version DESC',
+    [id],
+  );
+  return r.rows;
+}
+
+export async function setSequenceActive(pool, id, isActive) {
+  const r = await pool.query(
+    'UPDATE drip_sequence SET is_active = $2, updated_at = now() WHERE id = $1 RETURNING id, key, is_active',
+    [id, Boolean(isActive)],
+  );
+  return r.rows[0] ? { status: 'updated', sequence: r.rows[0] } : { status: 'not_found' };
+}
+
+// Global runtime pause (kill switch), stored in drip_setting.
+export async function isDripPaused(pool) {
+  const r = await pool.query("SELECT value FROM drip_setting WHERE key = 'paused'");
+  return r.rows[0] ? String(r.rows[0].value) === 'true' : false;
+}
+
+export async function setDripPaused(pool, paused, changedBy) {
+  await pool.query(
+    `INSERT INTO drip_setting (key, value, updated_by, updated_at) VALUES ('paused', $1, $2, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+    [paused ? 'true' : 'false', changedBy || 'dashboard'],
+  );
+  return { paused: Boolean(paused) };
 }
