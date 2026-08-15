@@ -4,7 +4,7 @@
 // SMS-segment / validation logic only for live feedback while typing.
 
 const $ = (id) => document.getElementById(id);
-const state = { cfg: {}, sequences: [], paused: false, stepStats: [], taxonomy: [], suppressions: [] };
+const state = { cfg: {}, sequences: [], paused: false, stepStats: [], variantStats: [], taxonomy: [], suppressions: [] };
 const getEditor = () => localStorage.getItem('fu-editor') || '';
 
 function showMsg(text, kind = 'error') {
@@ -175,7 +175,8 @@ function renderSequences() {
       const sent = sentFor(seq.key, st.step_index);
       const sentBadge = sent ? `<span class="fu-sent">sent ${esc(sent)}</span>` : '';
       const stepEdit = state.cfg.editEnabled ? `<button class="fu-btn fu-step-edit" data-step="${esc(st.id)}">⏱ Timing</button>` : '';
-      const msgs = (st.messages || []).map((m) => `<div class="fu-msg ${m.category_key != null ? 'cat' : ''}" data-msg="${esc(m.id)}">${msgInnerHTML(m)}</div>`).join('');
+      const addCat = state.cfg.editEnabled ? `<button class="fu-btn fu-add-cat" data-add-cat="${esc(st.id)}">＋ Category copy</button>` : '';
+      const msgs = (st.messages || []).map((m) => `<div class="fu-msg ${m.category_key != null ? 'cat' : ''}" data-msg="${esc(m.id)}">${msgInnerHTML(m, seq.key, st.step_index)}</div>`).join('');
       return `
         <div class="fu-step">
           <div class="fu-step-head" data-step-head="${esc(st.id)}">
@@ -184,6 +185,7 @@ function renderSequences() {
             ${st.is_active === false ? '<span class="fu-pill off">step off</span>' : ''}
             ${sentBadge}
             ${stepEdit}
+            ${addCat}
           </div>
           ${msgs || '<p class="hint">No message for this step.</p>'}
         </div>`;
@@ -205,15 +207,20 @@ function renderSequences() {
   }).join('');
 }
 
-// ---- Message editor (shared by edit + add-variant) ----
+// ---- Message editor (shared by edit + add-variant + add-category) ----
 function editorMarkup(o) {
-  const variantField = o.showVariant ? '<label class="fu-ed-inline">Variant <input type="text" class="fu-ed-variant" placeholder="B" /></label>' : '';
+  const catList = [...new Set((state.taxonomy || []).map((t) => t.category_key))].map((k) => `<option value="${esc(k)}"></option>`).join('');
+  const categoryField = o.showCategory
+    ? `<label class="fu-ed-inline">Category <input type="text" class="fu-ed-cat" list="fu-cat-list" placeholder="stump_grinding" value="${esc(o.category || '')}" /></label><datalist id="fu-cat-list">${catList}</datalist>`
+    : '';
+  const variantField = o.showVariant ? `<label class="fu-ed-inline">Variant <input type="text" class="fu-ed-variant" placeholder="B" value="${esc(o.variantDefault || '')}" /></label>` : '';
   const activeField = o.showActive ? `<label><input type="checkbox" class="fu-ed-active" ${o.active ? 'checked' : ''}/> Active</label>` : '';
   const editingAttr = o.editingId != null ? ` data-editing="${esc(o.editingId)}"` : '';
   return `
     <div class="fu-editor" data-vertical="${esc(o.vertical || '')}" data-category="${esc(o.category || '')}"${editingAttr}>
       <textarea class="fu-ed-body">${esc(o.body || '')}</textarea>
       <div class="fu-ed-row">
+        ${categoryField}
         ${variantField}
         <label><input type="checkbox" class="fu-ed-optout" ${o.optout ? 'checked' : ''}/> Carries opt-out (STOP)</label>
         ${activeField}
@@ -256,6 +263,36 @@ function openAddVariant(msgId) {
   host.after(wrap);
   updateEditorFeedback(wrap);
   wrap.querySelector('.fu-ed-variant').focus();
+}
+
+function openAddCategory(stepId) {
+  const found = findStep(stepId); if (!found) return;
+  const stepDiv = document.querySelector(`[data-step-head="${stepId}"]`).closest('.fu-step');
+  const wrap = document.createElement('div');
+  wrap.className = 'fu-msg fu-add-host';
+  wrap.innerHTML = editorMarkup({
+    vertical: found.seq.vertical, category: '', body: '', optout: false, weight: 1, variantDefault: 'A',
+    showActive: false, showVariant: true, showCategory: true, saveClass: 'fu-cat-save',
+    saveAttr: `data-cat-step="${esc(stepId)}"`, saveLabel: 'Add category copy',
+  });
+  stepDiv.appendChild(wrap);
+  updateEditorFeedback(wrap);
+  wrap.querySelector('.fu-ed-cat').focus();
+}
+
+async function saveAddCategory(btn, node) {
+  const stepId = Number(btn.dataset.catStep);
+  const categoryKey = node.querySelector('.fu-ed-cat').value.trim();
+  const variant = node.querySelector('.fu-ed-variant').value.trim() || 'A';
+  const body = node.querySelector('.fu-ed-body').value;
+  const includeOptout = node.querySelector('.fu-ed-optout').checked;
+  const weight = Number(node.querySelector('.fu-ed-weight').value) || 1;
+  if (!categoryKey) { showMsg('Enter a category key.'); return; }
+  try {
+    await api('/api/drip/message', { method: 'POST', body: { stepId, categoryKey, variant, body, includeOptout, weight, changedBy: getEditor() || undefined } });
+    await reloadSequences();
+    showMsg(`Category copy for "${categoryKey}" added.`, 'success');
+  } catch (e) { showMsg(e.message); }
 }
 
 function updateEditorFeedback(node) {
@@ -436,11 +473,13 @@ $('sequences').addEventListener('click', (e) => {
   let el;
   if ((el = t('.fu-edit'))) return openEditor(el.dataset.edit);
   if ((el = t('.fu-add-variant'))) return openAddVariant(el.dataset.addVariant);
+  if ((el = t('.fu-add-cat'))) return openAddCategory(el.dataset.addCat);
   if ((el = t('.fu-versions'))) return openHistory(el.dataset.versions);
   if ((el = t('.fu-revert'))) return revertMessageUI(el.dataset.revert, el.dataset.version);
   if ((el = t('.fu-msg-del'))) return deleteMessageUI(el.dataset.del);
   if ((el = t('.fu-save'))) return saveMessage(el.dataset.save, el.closest('.fu-msg'));
   if ((el = t('.fu-add-save'))) return saveNewMessage(el, el.closest('.fu-msg'));
+  if ((el = t('.fu-cat-save'))) return saveAddCategory(el, el.closest('.fu-msg'));
   if (t('.fu-cancel')) return renderSequences();
   if ((el = t('.fu-seq-toggle'))) return toggleSequence(el.dataset.seq, el.dataset.active !== '1');
   if ((el = t('.fu-seq-settings'))) return openSeqSettings(el.dataset.seqSettings);
@@ -452,6 +491,7 @@ $('sequences').addEventListener('click', (e) => {
 });
 $('sequences').addEventListener('input', (e) => {
   const ed = e.target.closest('.fu-editor'); if (!ed) return;
+  if (e.target.classList.contains('fu-ed-cat')) ed.dataset.category = e.target.value.trim();
   updateEditorFeedback(ed.closest('.fu-msg'));
 });
 
@@ -591,6 +631,7 @@ async function load() {
     state.cfg = cfg;
     state.sequences = detail.sequences || [];
     state.stepStats = report.stepStats || [];
+    state.variantStats = report.variantStats || [];
     state.paused = Boolean(pause.paused);
     renderModeNote();
     renderStatus();
