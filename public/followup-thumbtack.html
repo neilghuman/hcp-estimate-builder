@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Follow-up · Thumbtack — ScopeFoundry</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('scopefoundry-theme-mode') || localStorage.getItem('scopefoundry-theme') || 'auto';
+        var theme = (mode === 'light' || mode === 'dark') ? mode : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme-mode', mode);
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (_) {
+        document.documentElement.setAttribute('data-theme-mode', 'auto');
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/followup.css" />
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>📣 Follow-up · Thumbtack</h1>
+        <p class="sub">by United Services Northwest &mdash; Thumbtack follow-up sequences &amp; copy.</p>
+      </div>
+      <div class="toolbar">
+        <a href="/index.html" class="btn-toolbar">🏠 Home</a>
+        <a href="/followup.html" class="btn-toolbar">📊 Overview</a>
+        <button id="btnRefresh" class="btn-toolbar" title="Refresh">🔄 Refresh</button>
+        <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="followup-main">
+    <nav id="fuNav" class="fu-nav"></nav>
+    <div id="msg" class="msg" hidden></div>
+
+    <section class="card fu-note">
+      <p class="hint" id="modeNote">Loading…</p>
+    </section>
+
+    <section class="card">
+      <h2>Thumbtack — at a glance</h2>
+      <div id="srcStats" class="fu-outcomes"></div>
+    </section>
+
+    <section class="card">
+      <h2>Sequences &amp; cadence</h2>
+      <div id="seqNew" class="fu-seqnew" hidden></div>
+      <div id="sequences" class="fu-sequences"></div>
+    </section>
+
+    <section class="card">
+      <h2>Auto-reply templates</h2>
+      <p class="hint">The instant welcome messages n8n sends first (before the drip follow-ups). Edited here; n8n reads them live and falls back to its built-in copy if unreachable.</p>
+      <div id="templates" class="fu-templates"></div>
+    </section>
+
+    <section class="card">
+      <h2>Category taxonomy</h2>
+      <p class="hint">How raw platform categories map to the canonical keys used for category-specific copy. Shared <code>any</code> rows are read-only here — edit them on the Global page.</p>
+      <div class="fu-table-wrap">
+        <table class="fu-table" id="taxTable">
+          <thead>
+            <tr><th>Category key</th><th>Source</th><th>Raw value</th><th></th></tr>
+          </thead>
+          <tbody id="taxBody"></tbody>
+        </table>
+      </div>
+      <div id="taxAdd" class="fu-taxadd" hidden></div>
+    </section>
+
+    <section class="card">
+      <h2>Active enrollments</h2>
+      <div id="activeWrap" class="fu-table-wrap">
+        <table class="fu-table" id="activeTable">
+          <thead>
+            <tr><th>Lead</th><th>Vertical</th><th>Category</th><th>Step</th><th>Next due</th></tr>
+          </thead>
+          <tbody id="activeBody"></tbody>
+        </table>
+        <p id="activeEmpty" class="hint" hidden>No active enrollments right now.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/theme.js"></script>
+  <script>window.FU_PAGE = { mode: 'source', source: 'thumbtack' };</script>
+  <script src="/followup.js"></script>
+</body>
+</html>

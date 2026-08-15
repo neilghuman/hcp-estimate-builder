@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Follow-up · Overview — ScopeFoundry</title>
+  <title>Follow-up · Global — ScopeFoundry</title>
   <script>
     (function () {
       try {
@@ -24,13 +24,12 @@
   <header>
     <div class="header-top">
       <div>
-        <h1>📣 Follow-up Drip · Overview</h1>
-        <p class="sub">by United Services Northwest &mdash; automated lead follow-up across every source.</p>
+        <h1>📣 Follow-up · Global</h1>
+        <p class="sub">by United Services Northwest &mdash; cross-source settings: suppression, send pause, and shared taxonomy.</p>
       </div>
       <div class="toolbar">
         <a href="/index.html" class="btn-toolbar">🏠 Home</a>
-        <a href="/intake.html" class="btn-toolbar">📝 Intake</a>
-        <a href="/chatfoundry.html" class="btn-toolbar">💬 Chat Foundry</a>
+        <a href="/followup.html" class="btn-toolbar">📊 Overview</a>
         <button id="btnRefresh" class="btn-toolbar" title="Refresh">🔄 Refresh</button>
         <button id="btnTheme" class="btn-toolbar" title="Toggle theme">🌙 Dark</button>
       </div>
@@ -46,39 +45,43 @@
     </section>
 
     <section class="card">
-      <h2>By source</h2>
-      <p class="hint">Pick a source to manage its sequences, copy, and taxonomy.</p>
-      <div id="bySource" class="fu-srccards"></div>
-    </section>
-
-    <section class="card">
       <h2>System status</h2>
       <div id="statusChips" class="fu-chips"></div>
       <div id="editBar" class="fu-editbar" hidden></div>
     </section>
 
     <section class="card">
-      <h2>Enrollments (all sources)</h2>
-      <div class="fu-enroll-grid">
-        <div>
-          <h3>By status</h3>
-          <div id="byStatus" class="fu-badges"></div>
-        </div>
-        <div>
-          <h3>Exits by reason</h3>
-          <div id="byExit" class="fu-badges"></div>
-        </div>
+      <h2>Suppression list</h2>
+      <p class="hint">Numbers that will never be enrolled or messaged (opt-outs / do-not-contact) — applies across every source. Highest precedence.</p>
+      <div class="fu-table-wrap">
+        <table class="fu-table" id="supTable">
+          <thead>
+            <tr><th>Phone</th><th>Reason</th><th>Source</th><th>Added</th><th></th></tr>
+          </thead>
+          <tbody id="supBody"></tbody>
+        </table>
+        <p id="supEmpty" class="hint" hidden>No suppressed numbers.</p>
       </div>
+      <div id="supAdd" class="fu-taxadd" hidden></div>
     </section>
 
     <section class="card">
-      <h2>Outcomes (all sources)</h2>
-      <div id="outcomes" class="fu-outcomes"></div>
+      <h2>Category taxonomy (all sources)</h2>
+      <p class="hint">Every raw platform value &rarr; canonical category key, including shared <code>any</code> rows. Edit them here.</p>
+      <div class="fu-table-wrap">
+        <table class="fu-table" id="taxTable">
+          <thead>
+            <tr><th>Category key</th><th>Source</th><th>Raw value</th><th></th></tr>
+          </thead>
+          <tbody id="taxBody"></tbody>
+        </table>
+      </div>
+      <div id="taxAdd" class="fu-taxadd" hidden></div>
     </section>
   </main>
 
   <script src="/theme.js"></script>
-  <script>window.FU_PAGE = { mode: 'overview' };</script>
+  <script>window.FU_PAGE = { mode: 'global' };</script>
   <script src="/followup.js"></script>
 </body>
 </html>

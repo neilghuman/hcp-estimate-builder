@@ -200,3 +200,13 @@ button.fu-cat-link { font: inherit; font-size: 0.7rem; background: none; line-he
 /* Auto-reply templates */
 .fu-templates { display: flex; flex-direction: column; gap: 1.25rem; }
 .fu-tpl-body { min-height: 160px; }
+
+/* Per-source page nav + overview cards */
+.fu-nav { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+.fu-nav-link { padding: 0.35rem 0.8rem; border-radius: 8px; border: 1px solid var(--border-soft); color: var(--text); text-decoration: none; font-size: 0.9rem; background: var(--surface-soft); }
+.fu-nav-link.active { background: var(--fu-accent); color: #fff; border-color: var(--fu-accent); }
+.fu-srccards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.8rem; }
+.fu-src-card { display: block; padding: 0.8rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); text-decoration: none; color: var(--text); }
+.fu-src-card:hover { border-color: var(--fu-accent); }
+.fu-src-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem; }
+.fu-src-head h3 { margin: 0; }
