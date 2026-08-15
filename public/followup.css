@@ -93,3 +93,42 @@
 @media (max-width: 640px) {
   .fu-stats-grid { grid-template-columns: 1fr; }
 }
+
+/* ---- Editing (S4) ---- */
+.fu-editbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px solid var(--border-soft); }
+.fu-editbar label { font-size: 0.8rem; color: var(--muted); }
+.fu-editbar input[type="text"] {
+  padding: 0.35rem 0.55rem; border-radius: 7px; font-size: 0.85rem;
+  background: var(--control-bg); color: var(--control-text); border: 1px solid var(--control-border);
+}
+.fu-btn {
+  padding: 0.35rem 0.75rem; border-radius: 7px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+  background: var(--surface); color: var(--text); border: 1px solid var(--control-border);
+}
+.fu-btn:hover { background: var(--surface-soft); }
+.fu-btn.primary { background: var(--fu-accent); border-color: var(--fu-accent); color: #fff; }
+.fu-btn.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
+.fu-btn.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.fu-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.fu-msg-actions { margin-top: 0.35rem; display: flex; gap: 0.4rem; }
+.fu-ver { font-size: 0.7rem; color: var(--muted); margin-left: 0.4rem; }
+
+.fu-editor { margin-top: 0.4rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.fu-ed-body {
+  width: 100%; min-height: 90px; resize: vertical; font: inherit; font-size: 0.9rem;
+  padding: 0.5rem 0.6rem; border-radius: 8px;
+  background: var(--control-bg); color: var(--control-text); border: 1px solid var(--control-border);
+}
+.fu-ed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; font-size: 0.82rem; color: var(--text); }
+.fu-ed-row label { display: inline-flex; align-items: center; gap: 0.35rem; }
+.fu-ed-meta { display: flex; flex-wrap: wrap; gap: 0.6rem; font-size: 0.78rem; color: var(--muted); }
+.fu-ed-seg b { color: var(--title); }
+.fu-preview { padding: 0.5rem 0.7rem; border-radius: 8px; background: var(--surface); border: 1px dashed var(--border); font-size: 0.9rem; white-space: pre-wrap; }
+.fu-preview .fu-preview-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin-bottom: 0.2rem; }
+.fu-issues { display: flex; flex-direction: column; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+.fu-issue { font-size: 0.8rem; padding: 0.25rem 0.5rem; border-radius: 6px; }
+.fu-issue.error { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+.fu-issue.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
+.fu-pause-on { color: var(--warn); font-weight: 700; }

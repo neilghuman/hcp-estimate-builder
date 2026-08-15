@@ -43,16 +43,14 @@
     <div id="msg" class="msg" hidden></div>
 
     <section class="card fu-note">
-      <p class="hint">
-        <strong>Read-only view.</strong> This shows the live drip configuration, copy, and status.
-        Editing sequences and messages from here arrives in the next sprint — for now changes are made in the database.
-      </p>
+      <p class="hint" id="modeNote">Loading…</p>
     </section>
 
     <!-- System status -->
     <section class="card">
       <h2>System status</h2>
       <div id="statusChips" class="fu-chips"></div>
+      <div id="editBar" class="fu-editbar" hidden></div>
     </section>
 
     <!-- Ops summary -->

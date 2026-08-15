@@ -20,6 +20,8 @@ services:
       DB_PORT: "5432"
       OLLAMA_API_BASE: http://ollama:11434
       SCOPEFOUNDRY_AI_BASE: http://scopefoundry-ai:8200
+      # Drip follow-up config editing is enabled in dev for dashboard testing.
+      DRIP_CONFIG_EDIT_ENABLED: "true"
     ports:
       - "192.168.1.8:8123:8123"
     networks:

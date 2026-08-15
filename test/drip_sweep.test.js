@@ -101,6 +101,15 @@ test('sweepOnce dryRun reports would_send without sending or claiming', async ()
   assert.equal(pool.calls.some((c) => /INSERT INTO drip_delivery_log/.test(c.sql)), false);
 });
 
+test('sweepOnce no-ops when globally paused (real run)', async () => {
+  const routes = [{ match: /FROM drip_setting/, rows: () => ({ rows: [{ value: 'true' }] }) }, ...sweepRoutes(baseEnrollment)];
+  const pool = mockPool(routes);
+  const chatwoot = { getSnapshot: async () => openConv, send: async () => { throw new Error('should not send'); }, removeLabel: async () => {} };
+  const res = await sweepOnce(pool, { chatwoot, now: NOON_PDT, dryRun: false });
+  assert.deepEqual(res, [{ action: 'paused' }]);
+  assert.equal(pool.calls.some((c) => /FROM drip_enrollment/.test(c.sql)), false); // never looked for due work
+});
+
 test('sweepOnce sends, marks delivery, advances', async () => {
   const pool = mockPool(sweepRoutes(baseEnrollment));
   let sent = null;
