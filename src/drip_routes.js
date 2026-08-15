@@ -2,9 +2,9 @@
 // gated behind DRIP_WRITE_ENABLED (like the intake writes). No sends happen here (future sprint).
 import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, getSequencesDetailed,
   updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused,
-  addCategoryMap, deleteCategoryMap, updateStep } from './drip_runtime.js';
+  addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
-import { validateMessage, smsSegments, validateCategoryMap } from './drip.js';
+import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings } from './drip.js';
 import * as cw from './chatwoot.js';
 
 export function registerDripRoutes(app, pool) {
@@ -37,7 +37,7 @@ export function registerDripRoutes(app, pool) {
   });
 
   app.put('/api/drip/message/:id', requireEdit, async (req, res) => {
-    const { body, includeOptout, isActive, changedBy } = req.body || {};
+    const { body, includeOptout, isActive, weight, changedBy } = req.body || {};
     // Server-side validation mirrors the UI; hard errors block the save.
     if (body != null || includeOptout != null) {
       const issues = validateMessage(body != null ? body : '', { includeOptout: Boolean(includeOptout) });
@@ -45,15 +45,49 @@ export function registerDripRoutes(app, pool) {
       if (body != null && blocking.length) return res.status(422).json({ error: blocking[0].message, issues });
     }
     try {
-      const out = await updateMessage(pool, Number(req.params.id), { body, includeOptout, isActive, changedBy });
+      const out = await updateMessage(pool, Number(req.params.id), { body, includeOptout, isActive, weight, changedBy });
       if (out.status === 'not_found') return res.status(404).json(out);
       res.json({ ...out, segments: smsSegments(out.message.body) });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  app.put('/api/drip/sequence/:id', requireEdit, async (req, res) => {
+  app.post('/api/drip/message', requireEdit, async (req, res) => {
+    const { stepId, categoryKey, variant, body, includeOptout, weight, changedBy } = req.body || {};
+    if (!stepId) return res.status(422).json({ error: 'stepId is required.' });
+    const v = validateVariant(variant);
+    if (!v.ok) return res.status(422).json({ error: v.error });
+    const issues = validateMessage(body, { includeOptout: Boolean(includeOptout) });
+    const blocking = issues.filter((i) => i.level === 'error');
+    if (blocking.length) return res.status(422).json({ error: blocking[0].message, issues });
     try {
-      const out = await setSequenceActive(pool, Number(req.params.id), Boolean(req.body?.isActive));
+      const out = await addMessage(pool, { stepId: Number(stepId), categoryKey: categoryKey || null, variant: v.value, body, includeOptout, weight, changedBy });
+      if (out.status === 'not_found') return res.status(404).json({ error: 'Step not found.' });
+      if (out.status === 'conflict') return res.status(409).json({ error: `Variant "${v.value}" already exists for this step/category.` });
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/drip/message/:id', requireEdit, async (req, res) => {
+    try {
+      const out = await deleteMessage(pool, Number(req.params.id));
+      if (out.status === 'not_found') return res.status(404).json(out);
+      if (out.status === 'last_in_group') return res.status(409).json({ error: 'Cannot delete the only message for this step/category.' });
+      res.json(out);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.put('/api/drip/sequence/:id', requireEdit, async (req, res) => {
+    const patch = req.body || {};
+    try {
+      // Activation toggle and settings edits share the route.
+      if (patch.isActive != null && Object.keys(patch).filter((k) => k !== 'changedBy').length === 1) {
+        const out = await setSequenceActive(pool, Number(req.params.id), Boolean(patch.isActive));
+        if (out.status === 'not_found') return res.status(404).json(out);
+        return res.json(out);
+      }
+      const v = validateSequenceSettings(patch);
+      if (!v.ok) return res.status(422).json({ error: v.error });
+      const out = await updateSequence(pool, Number(req.params.id), v.value);
       if (out.status === 'not_found') return res.status(404).json(out);
       res.json(out);
     } catch (e) { res.status(500).json({ error: e.message }); }
