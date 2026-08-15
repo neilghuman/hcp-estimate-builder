@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   resolveCategoryKey, resolveMessage, renderBody,
   computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
-  smsSegments, validateMessage, validateCategoryMap,
+  smsSegments, validateMessage, validateCategoryMap, validateVariant, validateSequenceSettings,
 } from '../src/drip.js';
 const MAP = [
   { category_key: 'stump_grinding', source: 'thumbtack', raw_value: 'Tree Stump Grinding and Removal' },
@@ -255,4 +255,28 @@ test('validateCategoryMap: rejects bad key, source, and empties', () => {
   assert.equal(validateCategoryMap({ categoryKey: 'ok', source: 'facebook', rawValue: 'x' }).ok, false);
   assert.equal(validateCategoryMap({ categoryKey: 'ok', source: 'thumbtack', rawValue: '' }).ok, false);
   assert.equal(validateCategoryMap({ categoryKey: '', source: 'thumbtack', rawValue: 'x' }).ok, false);
+});
+
+test('validateVariant: accepts short tokens, rejects bad', () => {
+  assert.equal(validateVariant('B').ok, true);
+  assert.equal(validateVariant('promo_1').ok, true);
+  assert.equal(validateVariant('').ok, false);
+  assert.equal(validateVariant('has space').ok, false);
+  assert.equal(validateVariant('x'.repeat(21)).ok, false);
+});
+
+test('validateSequenceSettings: validates and normalizes provided fields', () => {
+  const ok = validateSequenceSettings({ maxMessages: 6, quietStart: '09:00', quietEnd: '19:30', variantStrategy: 'weighted_ab' });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.value, { maxMessages: 6, quietStart: '09:00', quietEnd: '19:30', variantStrategy: 'weighted_ab' });
+});
+
+test('validateSequenceSettings: rejects bad ranges/format/order and empty patch', () => {
+  assert.equal(validateSequenceSettings({ maxMessages: 0 }).ok, false);
+  assert.equal(validateSequenceSettings({ maxMessages: 25 }).ok, false);
+  assert.equal(validateSequenceSettings({ expiresAfterHours: 0 }).ok, false);
+  assert.equal(validateSequenceSettings({ quietStart: '9:00' }).ok, false);
+  assert.equal(validateSequenceSettings({ quietStart: '20:00', quietEnd: '08:00' }).ok, false);
+  assert.equal(validateSequenceSettings({ variantStrategy: 'nope' }).ok, false);
+  assert.equal(validateSequenceSettings({}).ok, false);
 });

@@ -118,6 +118,23 @@ function renderStats(report) {
   $('byExit').innerHTML = badges(report.byExit, 'exit_reason', 'n');
 }
 
+function renderOutcomes(o) {
+  o = o || {};
+  const total = Number(o.total) || 0;
+  const rate = total ? Math.round(((Number(o.replied) || 0) / total) * 100) : 0;
+  if (total === 0) { $('outcomes').innerHTML = '<span class="hint">No enrollments yet — metrics appear once leads are enrolled.</span>'; return; }
+  const tile = (label, val) => `<div class="fu-tile"><div class="fu-tile-n">${esc(val)}</div><div class="fu-tile-l">${esc(label)}</div></div>`;
+  $('outcomes').innerHTML = [
+    tile('enrolled', total),
+    tile('replied', `${o.replied || 0} (${rate}%)`),
+    tile('completed', o.completed || 0),
+    tile('active', o.active || 0),
+    tile('handled', o.handled || 0),
+    tile('dropped', o.dropped || 0),
+    tile('avg touches → reply', o.avg_touches_to_reply ?? '—'),
+  ].join('');
+}
+
 function msgInnerHTML(m) {
   const isCat = m.category_key != null;
   const label = isCat
@@ -126,8 +143,13 @@ function msgInnerHTML(m) {
   const optout = m.include_optout ? '<span class="fu-optout">✓ opt-out</span>' : '';
   const inactive = m.is_active === false ? ' <span class="fu-pill off">off</span>' : '';
   const ver = m.version ? `<span class="fu-ver">v${esc(m.version)}</span>` : '';
-  const actions = state.cfg.editEnabled ? `<div class="fu-msg-actions"><button class="fu-btn fu-edit" data-edit="${esc(m.id)}">✎ Edit</button></div>` : '';
-  return `<div class="fu-msg-label">${label}${optout}${inactive}${ver}</div><div class="fu-msg-text">${esc(m.body)}</div>${actions}`;
+  const wt = Number(m.weight) > 1 ? `<span class="fu-ver">weight ${esc(m.weight)}</span>` : '';
+  const actions = state.cfg.editEnabled ? `<div class="fu-msg-actions">
+    <button class="fu-btn fu-edit" data-edit="${esc(m.id)}">✎ Edit</button>
+    <button class="fu-btn fu-add-variant" data-add-variant="${esc(m.id)}">＋ Variant</button>
+    <button class="fu-btn danger fu-msg-del" data-del="${esc(m.id)}" title="Delete this message">🗑</button>
+  </div>` : '';
+  return `<div class="fu-msg-label">${label}${optout}${inactive}${ver}${wt}</div><div class="fu-msg-text">${esc(m.body)}</div>${actions}`;
 }
 
 function renderSequences() {
@@ -164,6 +186,7 @@ function renderSequences() {
         </div>`;
     }).join('');
 
+    const settingsBtn = state.cfg.editEnabled ? `<button class="fu-btn fu-seq-settings" data-seq-settings="${esc(seq.id)}">⚙ Settings</button>` : '';
     return `
       <div class="fu-seq">
         <div class="fu-seq-head">
@@ -171,42 +194,71 @@ function renderSequences() {
           ${activePill}
           <code>${esc(seq.key)}</code>
           ${toggle}
+          ${settingsBtn}
         </div>
-        <div class="fu-seq-head fu-seq-meta">${meta}</div>
+        <div class="fu-seq-head fu-seq-meta" data-seq-meta="${esc(seq.id)}">${meta}</div>
         <div class="fu-steps">${steps}</div>
       </div>`;
   }).join('');
 }
 
-// ---- Message editor ----
-function openEditor(id) {
-  const found = findMessage(id); if (!found) return;
-  const { msg, seq } = found;
-  const node = document.querySelector(`[data-msg="${id}"]`);
-  node.innerHTML = `
-    <div class="fu-editor" data-editing="${esc(id)}">
-      <textarea class="fu-ed-body">${esc(msg.body)}</textarea>
+// ---- Message editor (shared by edit + add-variant) ----
+function editorMarkup(o) {
+  const variantField = o.showVariant ? '<label class="fu-ed-inline">Variant <input type="text" class="fu-ed-variant" placeholder="B" /></label>' : '';
+  const activeField = o.showActive ? `<label><input type="checkbox" class="fu-ed-active" ${o.active ? 'checked' : ''}/> Active</label>` : '';
+  const editingAttr = o.editingId != null ? ` data-editing="${esc(o.editingId)}"` : '';
+  return `
+    <div class="fu-editor" data-vertical="${esc(o.vertical || '')}" data-category="${esc(o.category || '')}"${editingAttr}>
+      <textarea class="fu-ed-body">${esc(o.body || '')}</textarea>
       <div class="fu-ed-row">
-        <label><input type="checkbox" class="fu-ed-optout" ${msg.include_optout ? 'checked' : ''}/> Carries opt-out (STOP)</label>
-        <label><input type="checkbox" class="fu-ed-active" ${msg.is_active !== false ? 'checked' : ''}/> Active</label>
+        ${variantField}
+        <label><input type="checkbox" class="fu-ed-optout" ${o.optout ? 'checked' : ''}/> Carries opt-out (STOP)</label>
+        ${activeField}
+        <label class="fu-ed-inline">Weight <input type="number" min="1" step="1" class="fu-ed-weight" value="${esc(o.weight || 1)}" /></label>
       </div>
       <div class="fu-ed-meta"><span class="fu-ed-seg"></span></div>
       <ul class="fu-issues"></ul>
       <div class="fu-preview"><div class="fu-preview-label">Preview (sample values)</div><div class="fu-preview-body"></div></div>
       <div class="fu-msg-actions">
-        <button class="fu-btn primary fu-save" data-save="${esc(id)}">Save</button>
+        <button class="fu-btn primary ${o.saveClass}" ${o.saveAttr}>${o.saveLabel}</button>
         <button class="fu-btn fu-cancel">Cancel</button>
       </div>
     </div>`;
+}
+
+function openEditor(id) {
+  const found = findMessage(id); if (!found) return;
+  const { msg, seq } = found;
+  const node = document.querySelector(`[data-msg="${id}"]`);
+  node.innerHTML = editorMarkup({
+    editingId: id, vertical: seq.vertical, category: msg.category_key,
+    body: msg.body, optout: msg.include_optout, active: msg.is_active !== false, weight: msg.weight,
+    showActive: true, showVariant: false, saveClass: 'fu-save', saveAttr: `data-save="${esc(id)}"`, saveLabel: 'Save',
+  });
   updateEditorFeedback(node);
   node.querySelector('.fu-ed-body').focus();
 }
 
+function openAddVariant(msgId) {
+  const found = findMessage(msgId); if (!found) return;
+  const { msg, step, seq } = found;
+  const host = document.querySelector(`[data-msg="${msgId}"]`);
+  const wrap = document.createElement('div');
+  wrap.className = 'fu-msg fu-add-host';
+  wrap.innerHTML = editorMarkup({
+    vertical: seq.vertical, category: msg.category_key, body: '', optout: false, weight: 1,
+    showActive: false, showVariant: true, saveClass: 'fu-add-save',
+    saveAttr: `data-add-step="${esc(step.id)}" data-add-cat="${esc(msg.category_key || '')}"`, saveLabel: 'Add variant',
+  });
+  host.after(wrap);
+  updateEditorFeedback(wrap);
+  wrap.querySelector('.fu-ed-variant').focus();
+}
+
 function updateEditorFeedback(node) {
   const ed = node.querySelector('.fu-editor');
-  const found = ed ? findMessage(ed.dataset.editing) : null;
-  const vertical = found ? found.seq.vertical : null;
-  const category = found ? found.msg.category_key : null;
+  const vertical = ed?.dataset.vertical || null;
+  const category = ed?.dataset.category || null;
   const body = node.querySelector('.fu-ed-body').value;
   const optout = node.querySelector('.fu-ed-optout').checked;
   const seg = smsSegments(body);
@@ -215,16 +267,23 @@ function updateEditorFeedback(node) {
   node.querySelector('.fu-issues').innerHTML = issues.map((i) => `<li class="fu-issue ${i.level}">${i.level === 'error' ? '✕' : '⚠'} ${esc(i.message)}</li>`).join('');
   node.querySelector('.fu-preview-body').textContent = renderBody(body, sampleVars(vertical, category));
   const hasError = issues.some((i) => i.level === 'error');
-  const saveBtn = node.querySelector('.fu-save');
+  const saveBtn = node.querySelector('.fu-save, .fu-add-save');
   if (saveBtn) saveBtn.disabled = hasError;
+}
+
+async function reloadSequences() {
+  const detail = await api('/api/drip/sequences');
+  state.sequences = detail.sequences || [];
+  renderSequences();
 }
 
 async function saveMessage(id, node) {
   const body = node.querySelector('.fu-ed-body').value;
   const includeOptout = node.querySelector('.fu-ed-optout').checked;
   const isActive = node.querySelector('.fu-ed-active').checked;
+  const weight = Number(node.querySelector('.fu-ed-weight').value) || undefined;
   try {
-    const out = await api(`/api/drip/message/${id}`, { method: 'PUT', body: { body, includeOptout, isActive, changedBy: getEditor() || undefined } });
+    const out = await api(`/api/drip/message/${id}`, { method: 'PUT', body: { body, includeOptout, isActive, weight, changedBy: getEditor() || undefined } });
     const found = findMessage(id);
     if (found && out.message) Object.assign(found.msg, out.message);
     renderSequences();
@@ -234,6 +293,28 @@ async function saveMessage(id, node) {
   }
 }
 
+async function saveNewMessage(btn, node) {
+  const stepId = Number(btn.dataset.addStep);
+  const categoryKey = btn.dataset.addCat || null;
+  const variant = node.querySelector('.fu-ed-variant').value.trim();
+  const body = node.querySelector('.fu-ed-body').value;
+  const includeOptout = node.querySelector('.fu-ed-optout').checked;
+  const weight = Number(node.querySelector('.fu-ed-weight').value) || 1;
+  try {
+    await api('/api/drip/message', { method: 'POST', body: { stepId, categoryKey, variant, body, includeOptout, weight, changedBy: getEditor() || undefined } });
+    await reloadSequences();
+    showMsg(`Variant "${variant}" added.`, 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+async function deleteMessageUI(id) {
+  try {
+    await api(`/api/drip/message/${id}`, { method: 'DELETE' });
+    await reloadSequences();
+    showMsg('Message removed.', 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
 async function toggleSequence(id, makeActive) {
   try {
     const out = await api(`/api/drip/sequence/${id}`, { method: 'PUT', body: { isActive: makeActive } });
@@ -241,6 +322,46 @@ async function toggleSequence(id, makeActive) {
     if (seq && out.sequence) seq.is_active = out.sequence.is_active;
     renderSequences();
     showMsg(`Sequence ${makeActive ? 'activated' : 'deactivated'}.`, 'success');
+  } catch (e) { showMsg(e.message); }
+}
+
+// ---- Sequence settings editor ----
+function openSeqSettings(id) {
+  const seq = state.sequences.find((s) => String(s.id) === String(id)); if (!seq) return;
+  const meta = document.querySelector(`[data-seq-meta="${id}"]`);
+  const strat = ['random', 'round_robin', 'weighted_ab']
+    .map((s) => `<option value="${s}" ${seq.variant_strategy === s ? 'selected' : ''}>${s}</option>`).join('');
+  meta.innerHTML = `
+    <div class="fu-seq-settings">
+      <label>Max msgs <input type="number" min="1" max="20" class="fs-max" value="${esc(seq.max_messages)}" /></label>
+      <label>Quiet start <input type="time" class="fs-qs" value="${esc(String(seq.quiet_start_local).slice(0, 5))}" /></label>
+      <label>Quiet end <input type="time" class="fs-qe" value="${esc(String(seq.quiet_end_local).slice(0, 5))}" /></label>
+      <label>Expiry hrs <input type="number" min="1" max="720" class="fs-exp" value="${esc(seq.expires_after_hours)}" /></label>
+      <label>Variants <select class="fs-strat">${strat}</select></label>
+      <button class="fu-btn primary fu-seq-set-save" data-seq-set-save="${esc(id)}">Save</button>
+      <button class="fu-btn fu-seq-set-cancel">Cancel</button>
+    </div>`;
+}
+async function saveSeqSettings(id, meta) {
+  const body = {
+    maxMessages: Number(meta.querySelector('.fs-max').value),
+    quietStart: meta.querySelector('.fs-qs').value,
+    quietEnd: meta.querySelector('.fs-qe').value,
+    expiresAfterHours: Number(meta.querySelector('.fs-exp').value),
+    variantStrategy: meta.querySelector('.fs-strat').value,
+  };
+  try {
+    const out = await api(`/api/drip/sequence/${id}`, { method: 'PUT', body });
+    const seq = state.sequences.find((s) => String(s.id) === String(id));
+    if (seq && out.sequence) {
+      seq.max_messages = out.sequence.max_messages;
+      seq.expires_after_hours = out.sequence.expires_after_hours;
+      seq.quiet_start_local = out.sequence.quiet_start_local;
+      seq.quiet_end_local = out.sequence.quiet_end_local;
+      seq.variant_strategy = out.sequence.variant_strategy;
+    }
+    renderSequences();
+    showMsg('Sequence settings saved.', 'success');
   } catch (e) { showMsg(e.message); }
 }
 
@@ -280,24 +401,25 @@ async function saveStep(id, head) {
 
 // Delegated events for the sequences panel.
 $('sequences').addEventListener('click', (e) => {
-  const edit = e.target.closest('.fu-edit');
-  if (edit) return openEditor(edit.dataset.edit);
-  const cancel = e.target.closest('.fu-cancel');
-  if (cancel) return renderSequences();
-  const save = e.target.closest('.fu-save');
-  if (save) return saveMessage(save.dataset.save, save.closest('[data-msg]'));
-  const toggle = e.target.closest('.fu-seq-toggle');
-  if (toggle) return toggleSequence(toggle.dataset.seq, toggle.dataset.active !== '1');
-  const stepEdit = e.target.closest('.fu-step-edit');
-  if (stepEdit) return openStepEditor(stepEdit.dataset.step);
-  const stepSave = e.target.closest('.fu-step-save');
-  if (stepSave) return saveStep(stepSave.dataset.stepSave, stepSave.closest('[data-step-head]'));
-  const stepCancel = e.target.closest('.fu-step-cancel');
-  if (stepCancel) return renderSequences();
+  const t = (sel) => e.target.closest(sel);
+  let el;
+  if ((el = t('.fu-edit'))) return openEditor(el.dataset.edit);
+  if ((el = t('.fu-add-variant'))) return openAddVariant(el.dataset.addVariant);
+  if ((el = t('.fu-msg-del'))) return deleteMessageUI(el.dataset.del);
+  if ((el = t('.fu-save'))) return saveMessage(el.dataset.save, el.closest('.fu-msg'));
+  if ((el = t('.fu-add-save'))) return saveNewMessage(el, el.closest('.fu-msg'));
+  if (t('.fu-cancel')) return renderSequences();
+  if ((el = t('.fu-seq-toggle'))) return toggleSequence(el.dataset.seq, el.dataset.active !== '1');
+  if ((el = t('.fu-seq-settings'))) return openSeqSettings(el.dataset.seqSettings);
+  if ((el = t('.fu-seq-set-save'))) return saveSeqSettings(el.dataset.seqSetSave, el.closest('[data-seq-meta]'));
+  if (t('.fu-seq-set-cancel')) return renderSequences();
+  if ((el = t('.fu-step-edit'))) return openStepEditor(el.dataset.step);
+  if ((el = t('.fu-step-save'))) return saveStep(el.dataset.stepSave, el.closest('[data-step-head]'));
+  if (t('.fu-step-cancel')) return renderSequences();
 });
 $('sequences').addEventListener('input', (e) => {
   const ed = e.target.closest('.fu-editor'); if (!ed) return;
-  updateEditorFeedback(ed.closest('[data-msg]'));
+  updateEditorFeedback(ed.closest('.fu-msg'));
 });
 
 function renderActive(enrollments) {
@@ -386,6 +508,7 @@ async function load() {
     renderModeNote();
     renderStatus();
     renderStats(report);
+    renderOutcomes(report.outcomes);
     renderSequences();
     renderTaxonomy(detail.taxonomy);
     renderActive(active.enrollments || []);

@@ -112,6 +112,7 @@ export async function dripReport(pool) {
     byExit: byExit.rows,
     sequences: sequences.rows,
     stepStats: await dripStepStats(pool),
+    outcomes: await dripOutcomes(pool),
   };
 }
 
@@ -233,14 +234,15 @@ export async function getSequencesDetailed(pool) {
 
 // Update a single message. A body change is versioned: the prior body is copied to
 // drip_message_history and the version bumps. Flag-only changes do not bump the version.
-export async function updateMessage(pool, id, { body, includeOptout, isActive, changedBy } = {}) {
-  const cur = (await pool.query('SELECT id, body, include_optout, is_active, version FROM drip_message WHERE id = $1', [id])).rows[0];
+export async function updateMessage(pool, id, { body, includeOptout, isActive, weight, changedBy } = {}) {
+  const cur = (await pool.query('SELECT id, body, include_optout, is_active, weight, version FROM drip_message WHERE id = $1', [id])).rows[0];
   if (!cur) return { status: 'not_found' };
 
   const nextBody = body != null ? String(body) : cur.body;
   const bodyChanged = body != null && nextBody !== cur.body;
   const nextOptout = includeOptout != null ? Boolean(includeOptout) : cur.include_optout;
   const nextActive = isActive != null ? Boolean(isActive) : cur.is_active;
+  const nextWeight = weight != null ? Math.max(1, Math.round(Number(weight))) : cur.weight;
 
   if (bodyChanged) {
     await pool.query(
@@ -251,13 +253,80 @@ export async function updateMessage(pool, id, { body, includeOptout, isActive, c
   const nextVersion = bodyChanged ? Number(cur.version) + 1 : cur.version;
   const upd = await pool.query(
     `UPDATE drip_message
-        SET body = $2, include_optout = $3, is_active = $4, version = $5,
-            updated_by = $6, updated_at = now()
+        SET body = $2, include_optout = $3, is_active = $4, weight = $5, version = $6,
+            updated_by = $7, updated_at = now()
       WHERE id = $1
       RETURNING id, step_id, category_key, variant, body, include_optout, weight, is_active, version, updated_by`,
-    [id, nextBody, nextOptout, nextActive, nextVersion, changedBy || 'dashboard'],
+    [id, nextBody, nextOptout, nextActive, nextWeight, nextVersion, changedBy || 'dashboard'],
   );
   return { status: 'updated', message: upd.rows[0], versioned: bodyChanged };
+}
+
+// Add a new message (variant) to a step. Enforces the (step, category, variant) uniqueness.
+export async function addMessage(pool, { stepId, categoryKey, variant, body, includeOptout, weight, changedBy } = {}) {
+  const step = (await pool.query('SELECT id FROM drip_step WHERE id = $1', [stepId])).rows[0];
+  if (!step) return { status: 'not_found' };
+  const dupe = await pool.query(
+    "SELECT 1 FROM drip_message WHERE step_id = $1 AND COALESCE(category_key,'') = COALESCE($2,'') AND variant = $3",
+    [stepId, categoryKey || null, variant],
+  );
+  if (dupe.rows.length) return { status: 'conflict' };
+  const r = await pool.query(
+    `INSERT INTO drip_message (step_id, category_key, variant, body, include_optout, weight, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     RETURNING id, step_id, category_key, variant, body, include_optout, weight, is_active, version`,
+    [stepId, categoryKey || null, variant, String(body), Boolean(includeOptout), Math.max(1, Math.round(Number(weight) || 1)), changedBy || 'dashboard'],
+  );
+  return { status: 'created', message: r.rows[0] };
+}
+
+// Delete a message. Refuses to remove the last message in its (step, category) group so a step's
+// default copy can never disappear.
+export async function deleteMessage(pool, id) {
+  const cur = (await pool.query('SELECT id, step_id, category_key FROM drip_message WHERE id = $1', [id])).rows[0];
+  if (!cur) return { status: 'not_found' };
+  const siblings = await pool.query(
+    "SELECT count(*)::int AS n FROM drip_message WHERE step_id = $1 AND COALESCE(category_key,'') = COALESCE($2,'')",
+    [cur.step_id, cur.category_key],
+  );
+  if (siblings.rows[0].n <= 1) return { status: 'last_in_group' };
+  await pool.query('DELETE FROM drip_message WHERE id = $1', [id]);
+  return { status: 'deleted', id };
+}
+
+// Update sequence settings (partial). Accepts normalized fields from validateSequenceSettings.
+export async function updateSequence(pool, id, patch = {}) {
+  const map = {
+    maxMessages: 'max_messages', expiresAfterHours: 'expires_after_hours',
+    quietStart: 'quiet_start_local', quietEnd: 'quiet_end_local', variantStrategy: 'variant_strategy',
+  };
+  const sets = []; const vals = [id]; let i = 2;
+  for (const [k, col] of Object.entries(map)) {
+    if (patch[k] != null) { sets.push(`${col} = $${i}`); vals.push(patch[k]); i += 1; }
+  }
+  if (sets.length === 0) return { status: 'noop' };
+  const r = await pool.query(
+    `UPDATE drip_sequence SET ${sets.join(', ')}, updated_at = now() WHERE id = $1
+     RETURNING id, key, max_messages, expires_after_hours, quiet_start_local, quiet_end_local, variant_strategy`,
+    vals,
+  );
+  return r.rows[0] ? { status: 'updated', sequence: r.rows[0] } : { status: 'not_found' };
+}
+
+// Outcome summary across all enrollments, for the analytics panel.
+export async function dripOutcomes(pool) {
+  const r = await pool.query(
+    `SELECT
+       count(*)::int AS total,
+       count(*) FILTER (WHERE exit_reason = 'human_response')::int AS replied,
+       count(*) FILTER (WHERE status = 'completed')::int AS completed,
+       count(*) FILTER (WHERE status = 'active')::int AS active,
+       count(*) FILTER (WHERE exit_reason IN ('resolved','label_removed'))::int AS handled,
+       count(*) FILTER (WHERE exit_reason IN ('suppressed','undeliverable'))::int AS dropped,
+       round(avg(attempts) FILTER (WHERE exit_reason = 'human_response'), 1) AS avg_touches_to_reply
+     FROM drip_enrollment`,
+  );
+  return r.rows[0] || {};
 }
 
 // Message version history (newest first), for revert.

@@ -237,3 +237,40 @@ export function validateCategoryMap({ categoryKey, source, rawValue } = {}) {
   return { ok: true, value: { categoryKey: key, source: src, rawValue: raw } };
 }
 
+export const VARIANT_STRATEGIES = ['random', 'round_robin', 'weighted_ab'];
+
+// Validate a message variant label (a short token like A, B, promo1).
+export function validateVariant(variant) {
+  const v = String(variant || '').trim();
+  if (!v) return { ok: false, error: 'Variant label is required.' };
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(v)) return { ok: false, error: 'Variant must be 1–20 letters, numbers, - or _.' };
+  return { ok: true, value: v };
+}
+
+// Validate + normalize a partial sequence-settings patch. Only provided keys are checked/returned.
+export function validateSequenceSettings(patch = {}) {
+  const out = {};
+  if (patch.maxMessages != null) {
+    const n = Number(patch.maxMessages);
+    if (!Number.isInteger(n) || n < 1 || n > 20) return { ok: false, error: 'Max messages must be a whole number 1–20.' };
+    out.maxMessages = n;
+  }
+  if (patch.expiresAfterHours != null) {
+    const n = Number(patch.expiresAfterHours);
+    if (!Number.isInteger(n) || n < 1 || n > 720) return { ok: false, error: 'Expiry must be a whole number of hours 1–720.' };
+    out.expiresAfterHours = n;
+  }
+  const hhmm = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s));
+  if (patch.quietStart != null) { if (!hhmm(patch.quietStart)) return { ok: false, error: 'Quiet start must be HH:MM (24h).' }; out.quietStart = String(patch.quietStart); }
+  if (patch.quietEnd != null) { if (!hhmm(patch.quietEnd)) return { ok: false, error: 'Quiet end must be HH:MM (24h).' }; out.quietEnd = String(patch.quietEnd); }
+  if (out.quietStart != null && out.quietEnd != null && out.quietStart >= out.quietEnd) {
+    return { ok: false, error: 'Quiet start must be earlier than quiet end.' };
+  }
+  if (patch.variantStrategy != null) {
+    if (!VARIANT_STRATEGIES.includes(patch.variantStrategy)) return { ok: false, error: `Variant strategy must be one of: ${VARIANT_STRATEGIES.join(', ')}.` };
+    out.variantStrategy = patch.variantStrategy;
+  }
+  if (Object.keys(out).length === 0) return { ok: false, error: 'No valid fields to update.' };
+  return { ok: true, value: out };
+}
+
