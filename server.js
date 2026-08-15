@@ -21,6 +21,7 @@ import { registerChatFoundryRoutes } from './src/chatfoundry.js';
 import { recoverInterrupted } from './src/cf_sender.js';
 import { loadSettings as loadChatFoundrySettings } from './src/cf_settings.js';
 import { registerIntakeRoutes, recoverInterruptedIntakes } from './src/intake.js';
+import { registerDripRoutes } from './src/drip_routes.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -106,6 +107,9 @@ registerChatFoundryRoutes(app, pool);
 
 // Customer Intake System — office-staff intake wizard (HCP-integrated in later sprints).
 registerIntakeRoutes(app, pool);
+
+// Lead follow-up drip — enrollment + read/report API (sends gated/added in a later sprint).
+registerDripRoutes(app, pool);
 
 // Customer Intake — quarantine any intake left mid-submit by a restart (idempotent; re-submit resumes).
 recoverInterruptedIntakes(pool).then((r) => {
