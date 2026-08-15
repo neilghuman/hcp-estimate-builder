@@ -108,10 +108,24 @@ export async function sweepOnce(pool, { chatwoot, now = new Date(), dryRun = fal
       results.push({ id: e.id, action: 'sent', step: e.step, after: after.status });
     } catch (err) {
       await markDelivery(pool, idem, { status: 'failed', errorCode: String(err.message).slice(0, 200) });
-      results.push({ id: e.id, action: 'send_failed', error: err.message });
+      // Treat a failed send as a permanent delivery failure so the claimed step can't get stuck
+      // re-claiming forever. (Retry-with-backoff is a future enhancement.)
+      await exitEnrollment(pool, e.id, 'undeliverable');
+      if (e.conversation_id && chatwoot) { try { await chatwoot.removeLabel(e.conversation_id); } catch { /* non-fatal */ } }
+      results.push({ id: e.id, action: 'exit', reason: 'undeliverable', error: err.message });
     }
   }
   return results;
+}
+
+// Add the pending-callback label to a conversation (idempotent union with existing labels).
+export async function ensurePendingLabel(cw, convId, label = 'A_pending_callback') {
+  const conv = await cw.getConversation(convId);
+  const labels = new Set(conv?.labels || []);
+  if (labels.has(label)) return false;
+  labels.add(label);
+  await cw.setConversationLabels(convId, [...labels]);
+  return true;
 }
 
 // Real Chatwoot adapter over src/chatwoot.js. Only constructed when sends are enabled.

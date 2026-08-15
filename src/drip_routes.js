@@ -1,7 +1,7 @@
 // Lead follow-up drip — HTTP routes. Read endpoints are open; enrollment/suppression writes are
 // gated behind DRIP_WRITE_ENABLED (like the intake writes). No sends happen here (future sprint).
 import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression } from './drip_runtime.js';
-import { sweepOnce, realDripChatwoot } from './drip_sweep.js';
+import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
 import * as cw from './chatwoot.js';
 
 export function registerDripRoutes(app, pool) {
@@ -19,8 +19,14 @@ export function registerDripRoutes(app, pool) {
 
   app.post('/api/drip/enroll', async (req, res) => {
     if (!dripConfig().writeEnabled) return res.status(403).json({ error: 'DRIP_WRITE_ENABLED is off' });
-    try { res.json(await enrollLead(pool, req.body || {})); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    try {
+      const body = req.body || {};
+      const result = await enrollLead(pool, body);
+      if (result.status === 'enrolled' && body.conversationId) {
+        try { await ensurePendingLabel(cw, body.conversationId); } catch { /* non-fatal: label is best-effort */ }
+      }
+      res.json(result);
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   app.post('/api/drip/suppress', async (req, res) => {
