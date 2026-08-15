@@ -277,7 +277,7 @@ export function registerDripRoutes(app, pool) {
   });
 
   app.get('/api/drip/enrollments', async (req, res) => {
-    try { res.json({ enrollments: await getEnrollments(pool, { status: req.query.status || null }) }); }
+    try { res.json({ enrollments: await getEnrollments(pool, { status: req.query.status || null, source: req.query.source || null }) }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 

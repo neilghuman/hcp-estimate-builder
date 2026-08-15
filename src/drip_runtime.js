@@ -91,15 +91,16 @@ export async function resolveNextMessage(pool, enrollment) {
   return resolveMessage(msgRes.rows, { categoryKey: enrollment.category_key, strategy });
 }
 
-export async function getEnrollments(pool, { status = null, limit = 100 } = {}) {
+export async function getEnrollments(pool, { status = null, source = null, limit = 100 } = {}) {
   const r = await pool.query(
     `SELECT id, lead_ref, source, vertical, category_key, phone_e164, step, status,
             t0_at, next_due_at, attempts, exit_reason
        FROM drip_enrollment
       WHERE ($1::text IS NULL OR status = $1)
+        AND ($2::text IS NULL OR source = $2)
       ORDER BY next_due_at NULLS LAST
-      LIMIT $2`,
-    [status, limit],
+      LIMIT $3`,
+    [status, source, limit],
   );
   return r.rows;
 }
@@ -115,7 +116,26 @@ export async function dripReport(pool) {
     stepStats: await dripStepStats(pool),
     variantStats: await dripVariantStats(pool),
     outcomes: await dripOutcomes(pool),
+    bySource: await dripBySource(pool),
   };
+}
+
+// Per-source rollup for the Overview page + each source page's stats strip.
+export async function dripBySource(pool) {
+  const r = await pool.query(
+    `SELECT source,
+       count(*)::int AS total,
+       count(*) FILTER (WHERE status = 'active')::int AS active,
+       count(*) FILTER (WHERE status = 'completed')::int AS completed,
+       count(*) FILTER (WHERE exit_reason = 'human_response')::int AS replied,
+       count(*) FILTER (WHERE exit_reason IN ('resolved','label_removed'))::int AS handled,
+       count(*) FILTER (WHERE exit_reason IN ('suppressed','undeliverable'))::int AS dropped,
+       coalesce(round(100.0 * count(*) FILTER (WHERE exit_reason = 'human_response') / NULLIF(count(*), 0), 1), 0)::float AS response_rate
+     FROM drip_enrollment
+     GROUP BY source
+     ORDER BY source`,
+  );
+  return r.rows;
 }
 
 export async function addSuppression(pool, phone, reason, source) {
