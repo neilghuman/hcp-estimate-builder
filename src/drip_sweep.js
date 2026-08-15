@@ -54,7 +54,7 @@ async function resolveMessageFor(pool, enrollment) {
   const seqRes = await pool.query('SELECT variant_strategy FROM drip_sequence WHERE id = $1', [enrollment.sequence_id]);
   const strategy = seqRes.rows[0]?.variant_strategy || 'random';
   const msgRes = await pool.query(
-    `SELECT m.category_key, m.variant, m.body, m.weight, m.is_active
+    `SELECT m.id, m.category_key, m.variant, m.body, m.weight, m.is_active
        FROM drip_message m JOIN drip_step st ON st.id = m.step_id
       WHERE st.sequence_id = $1 AND st.step_index = $2`,
     [enrollment.sequence_id, enrollment.step],
@@ -101,7 +101,7 @@ export async function sweepOnce(pool, { chatwoot, now = new Date(), dryRun = fal
     if (dryRun) { results.push({ id: e.id, action: 'would_send', step: e.step, body }); continue; }
 
     const idem = buildIdemKey(e.lead_ref, e.step);
-    if (!(await claimStep(pool, e, idem))) { results.push({ id: e.id, action: 'skip_claimed' }); continue; }
+    if (!(await claimStep(pool, e, idem, { messageId: message.id, variant: message.variant }))) { results.push({ id: e.id, action: 'skip_claimed' }); continue; }
     try {
       const sent = await chatwoot.send(e.conversation_id, body, e.step);
       await markDelivery(pool, idem, { status: 'sent', providerMessageId: sent && sent.id });

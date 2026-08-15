@@ -119,6 +119,8 @@ test('sweepOnce sends, marks delivery, advances', async () => {
   assert.equal(sent.cid, '900');
   assert.equal(sent.body, 'Hi there, stump grinding.'); // rendered
   assert.ok(pool.calls.some((c) => /UPDATE drip_delivery_log/.test(c.sql)));
+  const claim = pool.calls.find((c) => /INSERT INTO drip_delivery_log/.test(c.sql));
+  assert.equal(claim.params[claim.params.length - 1], 'A'); // variant recorded
 });
 
 test('sweepOnce exits + removes label on human reply', async () => {

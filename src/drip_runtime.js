@@ -112,6 +112,7 @@ export async function dripReport(pool) {
     byExit: byExit.rows,
     sequences: sequences.rows,
     stepStats: await dripStepStats(pool),
+    variantStats: await dripVariantStats(pool),
     outcomes: await dripOutcomes(pool),
   };
 }
@@ -173,13 +174,13 @@ export async function isPhoneSuppressed(pool, phone) {
 }
 
 // Atomic per-step claim via the delivery log's unique idem_key. Returns true if this call won.
-export async function claimStep(pool, enrollment, idemKey) {
+export async function claimStep(pool, enrollment, idemKey, { messageId = null, variant = null } = {}) {
   const r = await pool.query(
-    `INSERT INTO drip_delivery_log (enrollment_id, lead_ref, step, idem_key, status)
-     VALUES ($1,$2,$3,$4,'sending')
+    `INSERT INTO drip_delivery_log (enrollment_id, lead_ref, step, idem_key, status, message_id, variant)
+     VALUES ($1,$2,$3,$4,'sending',$5,$6)
      ON CONFLICT (idem_key) DO NOTHING
      RETURNING id`,
-    [enrollment.id, enrollment.lead_ref, enrollment.step, idemKey],
+    [enrollment.id, enrollment.lead_ref, enrollment.step, idemKey, messageId, variant],
   );
   return r.rows.length > 0;
 }
@@ -293,16 +294,18 @@ export async function addMessage(pool, { stepId, categoryKey, variant, body, inc
   return { status: 'created', message: r.rows[0] };
 }
 
-// Delete a message. Refuses to remove the last message in its (step, category) group so a step's
-// default copy can never disappear.
+// Delete a message. Refuses only to remove a step's last DEFAULT (category-less) message, so every
+// step always keeps default copy. Category-specific overrides can be fully removed (falls back to default).
 export async function deleteMessage(pool, id) {
   const cur = (await pool.query('SELECT id, step_id, category_key FROM drip_message WHERE id = $1', [id])).rows[0];
   if (!cur) return { status: 'not_found' };
-  const siblings = await pool.query(
-    "SELECT count(*)::int AS n FROM drip_message WHERE step_id = $1 AND COALESCE(category_key,'') = COALESCE($2,'')",
-    [cur.step_id, cur.category_key],
-  );
-  if (siblings.rows[0].n <= 1) return { status: 'last_in_group' };
+  if (cur.category_key == null) {
+    const defaults = await pool.query(
+      'SELECT count(*)::int AS n FROM drip_message WHERE step_id = $1 AND category_key IS NULL',
+      [cur.step_id],
+    );
+    if (defaults.rows[0].n <= 1) return { status: 'last_in_group' };
+  }
   await pool.query('DELETE FROM drip_message WHERE id = $1', [id]);
   return { status: 'deleted', id };
 }
@@ -421,6 +424,20 @@ export async function dripStepStats(pool) {
       WHERE dl.status = 'sent'
       GROUP BY s.key, dl.step
       ORDER BY s.key, dl.step`,
+  );
+  return r.rows;
+}
+
+// Per-variant delivery counts (sent) keyed by sequence + step, for A/B measurement.
+export async function dripVariantStats(pool) {
+  const r = await pool.query(
+    `SELECT s.key AS sequence_key, dl.step, dl.variant, count(*)::int AS sent
+       FROM drip_delivery_log dl
+       JOIN drip_enrollment e ON e.lead_ref = dl.lead_ref
+       JOIN drip_sequence s ON s.id = e.sequence_id
+      WHERE dl.status = 'sent' AND dl.variant IS NOT NULL
+      GROUP BY s.key, dl.step, dl.variant
+      ORDER BY s.key, dl.step, dl.variant`,
   );
   return r.rows;
 }

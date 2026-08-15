@@ -98,7 +98,7 @@ export function registerDripRoutes(app, pool) {
     try {
       const out = await deleteMessage(pool, Number(req.params.id));
       if (out.status === 'not_found') return res.status(404).json(out);
-      if (out.status === 'last_in_group') return res.status(409).json({ error: 'Cannot delete the only message for this step/category.' });
+      if (out.status === 'last_in_group') return res.status(409).json({ error: 'Cannot delete the step\'s only default message.' });
       res.json(out);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
