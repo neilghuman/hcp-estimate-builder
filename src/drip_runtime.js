@@ -61,15 +61,15 @@ export async function enrollLead(pool, lead) {
   const ins = await pool.query(
     `INSERT INTO drip_enrollment
        (sequence_id, lead_ref, conversation_id, source, vertical, channel, phone_e164,
-        category_raw, category_key, time_zone, step, t0_at, next_due_at, max_messages, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,$13,$14)
+        category_raw, category_key, time_zone, step, t0_at, next_due_at, max_messages, expires_at, first_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,$13,$14,$15)
      ON CONFLICT (lead_ref) DO NOTHING
      RETURNING id`,
     [
       seq.id, leadRef, lead.conversationId || null, source || null, vertical || null,
       lead.channel || 'sms', phone, lead.categoryRaw || null, categoryKey,
       lead.timeZone || seq.tz_default, t0Date.toISOString(), nextDue.toISOString(),
-      Number(seq.max_messages), expiresAt.toISOString(),
+      Number(seq.max_messages), expiresAt.toISOString(), lead.firstName || null,
     ],
   );
   if (ins.rows[0]) return { status: 'enrolled', enrollmentId: ins.rows[0].id, categoryKey, nextDueAt: nextDue.toISOString() };
@@ -127,7 +127,7 @@ export async function addSuppression(pool, phone, reason, source) {
 export async function getDue(pool, now = new Date(), limit = 50) {
   const r = await pool.query(
     `SELECT id, sequence_id, lead_ref, conversation_id, source, vertical, phone_e164,
-            category_key, time_zone, step, t0_at, attempts, max_messages, expires_at, status
+            category_key, first_name, time_zone, step, t0_at, attempts, max_messages, expires_at, status
        FROM drip_enrollment
       WHERE status = 'active' AND next_due_at IS NOT NULL AND next_due_at <= $1
       ORDER BY next_due_at

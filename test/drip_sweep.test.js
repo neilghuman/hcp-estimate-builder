@@ -1,7 +1,7 @@
 // Drip sweep — unit tests. Pure planners + sweepOnce with mock pool + mock chatwoot.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planStep, planAfterSend, sweepOnce } from '../src/drip_sweep.js';
+import { planStep, planAfterSend, sweepOnce, ensurePendingLabel } from '../src/drip_sweep.js';
 
 const NOON_PDT = new Date('2026-08-14T19:00:00Z'); // 12:00 America/Los_Angeles
 const SEQ = { tz_default: 'America/Los_Angeles', quiet_start_local: '08:00', quiet_end_local: '20:00' };
@@ -128,4 +128,49 @@ test('sweepOnce skips when the conversation snapshot cannot be read', async () =
   const chatwoot = { getSnapshot: async () => null, send: async () => ({ id: 'x' }), removeLabel: async () => {} };
   const res = await sweepOnce(pool, { chatwoot, now: NOON_PDT, dryRun: false });
   assert.equal(res[0].action, 'skip_no_snapshot');
+});
+
+test('sweepOnce exits undeliverable + removes label when the send fails', async () => {
+  const pool = mockPool(sweepRoutes(baseEnrollment));
+  let removed = false;
+  const chatwoot = {
+    getSnapshot: async () => openConv,
+    send: async () => { throw new Error('telnyx blocked'); },
+    removeLabel: async () => { removed = true; },
+  };
+  const res = await sweepOnce(pool, { chatwoot, now: NOON_PDT, dryRun: false });
+  assert.equal(res[0].action, 'exit');
+  assert.equal(res[0].reason, 'undeliverable');
+  assert.equal(removed, true);
+  assert.ok(pool.calls.some((c) => /SET status = 'exited'/.test(c.sql)));
+});
+
+test('sweepOnce renders the contact first name when present', async () => {
+  const pool = mockPool(sweepRoutes({ ...baseEnrollment, first_name: 'Sarah' }));
+  let sent = null;
+  const chatwoot = { getSnapshot: async () => openConv, send: async (cid, body) => { sent = body; return { id: 'm2' }; }, removeLabel: async () => {} };
+  await sweepOnce(pool, { chatwoot, now: NOON_PDT, dryRun: false });
+  assert.equal(sent, 'Hi Sarah, stump grinding.');
+});
+
+test('ensurePendingLabel adds the label via a union with existing labels', async () => {
+  let setTo = null;
+  const cw = {
+    getConversation: async () => ({ labels: ['existing'] }),
+    setConversationLabels: async (_id, labels) => { setTo = labels; },
+  };
+  const added = await ensurePendingLabel(cw, '900');
+  assert.equal(added, true);
+  assert.ok(setTo.includes('A_pending_callback'));
+  assert.ok(setTo.includes('existing'));
+});
+
+test('ensurePendingLabel is a no-op when the label already exists', async () => {
+  let called = false;
+  const cw = {
+    getConversation: async () => ({ labels: ['A_pending_callback'] }),
+    setConversationLabels: async () => { called = true; },
+  };
+  assert.equal(await ensurePendingLabel(cw, '900'), false);
+  assert.equal(called, false);
 });

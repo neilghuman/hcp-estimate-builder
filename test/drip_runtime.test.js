@@ -37,13 +37,15 @@ test('enrollLead: happy path enrolls, maps category, computes next_due', async (
     { match: /INSERT INTO drip_enrollment/, rows: () => ({ rows: [{ id: 99 }] }) },
   ]);
   const res = await enrollLead(pool, {
-    leadRef: 'c2', source: 'thumbtack', vertical: 'tree', phone: '+12065550101',
+    leadRef: 'c2', source: 'thumbtack', vertical: 'tree', phone: '+12065550101', firstName: 'Sarah',
     categoryRaw: 'Tree Stump Grinding and Removal', t0: '2026-08-14T18:00:00Z', // 11:00 PDT
   });
   assert.equal(res.status, 'enrolled');
   assert.equal(res.enrollmentId, 99);
   assert.equal(res.categoryKey, 'stump_grinding');
   assert.ok(res.nextDueAt); // +30m, inside contact hours -> ~11:30 PDT
+  const insert = pool.calls.find((c) => /INSERT INTO drip_enrollment/.test(c.sql));
+  assert.ok(insert.params.includes('Sarah')); // first_name captured
 });
 
 test('enrollLead: no matching sequence', async () => {
