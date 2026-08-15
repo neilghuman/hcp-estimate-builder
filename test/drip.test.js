@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   resolveCategoryKey, resolveMessage, renderBody,
   computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
-  smsSegments, validateMessage,
+  smsSegments, validateMessage, validateCategoryMap,
 } from '../src/drip.js';
 const MAP = [
   { category_key: 'stump_grinding', source: 'thumbtack', raw_value: 'Tree Stump Grinding and Removal' },
@@ -242,4 +242,17 @@ test('validateMessage: STOP without flag warns; unknown placeholder warns', () =
 test('validateMessage: clean opt-out message has no errors', () => {
   const issues = validateMessage('Hi {name}, reply STOP to opt out.', { includeOptout: true });
   assert.equal(issues.filter((i) => i.level === 'error').length, 0);
+});
+
+test('validateCategoryMap: normalizes and accepts a valid row', () => {
+  const v = validateCategoryMap({ categoryKey: '  Stump_Grinding ', source: 'Thumbtack', rawValue: '  Tree Stump Grinding ' });
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.value, { categoryKey: 'stump_grinding', source: 'thumbtack', rawValue: 'Tree Stump Grinding' });
+});
+
+test('validateCategoryMap: rejects bad key, source, and empties', () => {
+  assert.equal(validateCategoryMap({ categoryKey: 'Bad Key!', source: 'thumbtack', rawValue: 'x' }).ok, false);
+  assert.equal(validateCategoryMap({ categoryKey: 'ok', source: 'facebook', rawValue: 'x' }).ok, false);
+  assert.equal(validateCategoryMap({ categoryKey: 'ok', source: 'thumbtack', rawValue: '' }).ok, false);
+  assert.equal(validateCategoryMap({ categoryKey: '', source: 'thumbtack', rawValue: 'x' }).ok, false);
 });

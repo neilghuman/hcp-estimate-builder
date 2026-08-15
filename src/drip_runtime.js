@@ -111,6 +111,7 @@ export async function dripReport(pool) {
     byStatus: byStatus.rows,
     byExit: byExit.rows,
     sequences: sequences.rows,
+    stepStats: await dripStepStats(pool),
   };
 }
 
@@ -220,7 +221,7 @@ export async function getSequencesDetailed(pool) {
        FROM drip_message ORDER BY step_id, category_key NULLS FIRST, variant`,
   );
   const taxonomy = await pool.query(
-    'SELECT category_key, source, raw_value FROM drip_category_map ORDER BY category_key, source, raw_value',
+    'SELECT id, category_key, source, raw_value FROM drip_category_map ORDER BY category_key, source, raw_value',
   );
   return {
     sequences: nestSequences(seq.rows, steps.rows, msgs.rows),
@@ -289,4 +290,47 @@ export async function setDripPaused(pool, paused, changedBy) {
     [paused ? 'true' : 'false', changedBy || 'dashboard'],
   );
   return { paused: Boolean(paused) };
+}
+
+// Taxonomy: map a raw platform value to a canonical category_key. Upserts on (source, raw_value).
+export async function addCategoryMap(pool, { categoryKey, source, rawValue }) {
+  const r = await pool.query(
+    `INSERT INTO drip_category_map (category_key, source, raw_value) VALUES ($1,$2,$3)
+     ON CONFLICT (source, raw_value) DO UPDATE SET category_key = EXCLUDED.category_key
+     RETURNING id, category_key, source, raw_value`,
+    [categoryKey, source, rawValue],
+  );
+  return { status: 'saved', row: r.rows[0] };
+}
+
+export async function deleteCategoryMap(pool, id) {
+  const r = await pool.query('DELETE FROM drip_category_map WHERE id = $1 RETURNING id', [id]);
+  return r.rows[0] ? { status: 'deleted', id: r.rows[0].id } : { status: 'not_found' };
+}
+
+// Edit a step's timing / active flag. offset_minutes must be >= 0.
+export async function updateStep(pool, id, { offsetMinutes, isActive } = {}) {
+  const cur = (await pool.query('SELECT id, offset_minutes, is_active FROM drip_step WHERE id = $1', [id])).rows[0];
+  if (!cur) return { status: 'not_found' };
+  const nextOffset = offsetMinutes != null ? Math.max(0, Math.round(Number(offsetMinutes))) : cur.offset_minutes;
+  const nextActive = isActive != null ? Boolean(isActive) : cur.is_active;
+  const r = await pool.query(
+    'UPDATE drip_step SET offset_minutes = $2, is_active = $3, updated_at = now() WHERE id = $1 RETURNING id, sequence_id, step_index, offset_minutes, is_active',
+    [id, nextOffset, nextActive],
+  );
+  return { status: 'updated', step: r.rows[0] };
+}
+
+// Per-step delivery counts (sent) keyed by sequence, for dashboard analytics.
+export async function dripStepStats(pool) {
+  const r = await pool.query(
+    `SELECT s.key AS sequence_key, dl.step, count(*)::int AS sent
+       FROM drip_delivery_log dl
+       JOIN drip_enrollment e ON e.lead_ref = dl.lead_ref
+       JOIN drip_sequence s ON s.id = e.sequence_id
+      WHERE dl.status = 'sent'
+      GROUP BY s.key, dl.step
+      ORDER BY s.key, dl.step`,
+  );
+  return r.rows;
 }

@@ -223,3 +223,17 @@ export function validateMessage(body, { includeOptout = false } = {}) {
   return issues;
 }
 
+export const TAXONOMY_SOURCES = ['thumbtack', 'google_lsa', 'any'];
+
+// Validate + normalize a category-map row. Returns { ok, value?, error? }.
+export function validateCategoryMap({ categoryKey, source, rawValue } = {}) {
+  const key = String(categoryKey || '').trim().toLowerCase();
+  const src = String(source || '').trim().toLowerCase();
+  const raw = String(rawValue || '').trim();
+  if (!key) return { ok: false, error: 'Category key is required.' };
+  if (!/^[a-z0-9_]+$/.test(key)) return { ok: false, error: 'Category key may only contain lowercase letters, numbers, and underscores.' };
+  if (!TAXONOMY_SOURCES.includes(src)) return { ok: false, error: `Source must be one of: ${TAXONOMY_SOURCES.join(', ')}.` };
+  if (!raw) return { ok: false, error: 'Raw value is required.' };
+  return { ok: true, value: { categoryKey: key, source: src, rawValue: raw } };
+}
+

@@ -132,3 +132,17 @@
 .fu-issue.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 
 .fu-pause-on { color: var(--warn); font-weight: 700; }
+
+/* Per-step sent count + step timing editor */
+.fu-sent { font-size: 0.72rem; color: var(--ok); font-weight: 600; margin-left: 0.2rem; }
+.fu-step-ed { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--text); }
+.fu-step-ed input[type="number"] { width: 6rem; padding: 0.25rem 0.4rem; border-radius: 6px; background: var(--control-bg); color: var(--control-text); border: 1px solid var(--control-border); }
+
+/* Taxonomy manager */
+.fu-tax-del { padding: 0.1rem 0.45rem; font-size: 0.8rem; }
+.fu-taxadd { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+.fu-taxadd input[type="text"], .fu-taxadd select {
+  padding: 0.35rem 0.5rem; border-radius: 7px; font-size: 0.85rem;
+  background: var(--control-bg); color: var(--control-text); border: 1px solid var(--control-border);
+}
+.fu-taxadd input#taxRaw { flex: 1; min-width: 12rem; }
