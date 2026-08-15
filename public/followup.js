@@ -399,6 +399,7 @@ function openNewSequence() {
     <p class="hint">New sequences start <strong>inactive</strong> and empty — add steps, then activate. Enrolling leads into it also needs an n8n hook for that source.</p>`;
   $('btnCreateSeq').addEventListener('click', saveNewSequence);
   $('btnCancelSeq').addEventListener('click', renderSeqNew);
+  if (PAGE.mode === 'source') { const ss = $('seqNew').querySelector('.ns-source'); if (ss) ss.value = PAGE.source; }
 }
 
 async function saveNewSequence() {
@@ -677,6 +678,7 @@ function renderTaxonomy(taxonomy) {
     <input type="text" id="taxRaw" placeholder="raw value (e.g. Tree Stump Grinding)" />
     <button class="fu-btn primary" id="taxAddBtn">+ Add mapping</button>`;
   $('taxAddBtn').addEventListener('click', addTaxonomy);
+  if (PAGE.mode === 'source') $('taxSource').value = PAGE.source;
 }
 
 $('taxBody')?.addEventListener('click', (e) => {
@@ -840,6 +842,11 @@ function renderTemplates(list) {
     </div>` : '';
 
   $('templates').innerHTML = groupsHtml + empty + addForm;
+  if (PAGE.mode === 'source') {
+    const g = $('templates').querySelector('.fu-nt-group');
+    const pfx = (SOURCES.find((s) => s.key === PAGE.source) || {}).groupPrefix;
+    if (g && pfx && !g.value) g.value = pfx;
+  }
 }
 
 function findTemplate(key) { return (state.templates || []).find((t) => t.template_key === key); }
