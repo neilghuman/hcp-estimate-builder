@@ -6,6 +6,8 @@ import {
   computeNextDueAt, buildIdemKey, parseHHMM, quietHoursDelayMinutes, applyQuietHours, evaluateStop, nestSequences,
   smsSegments, validateMessage, validateCategoryMap, validateVariant, validateSequenceSettings, validateSequenceCreate,
   validateTemplateBody,
+  autoreplySource,
+  pickAutoreplyTemplate,
 } from '../src/drip.js';
 const MAP = [
   { category_key: 'stump_grinding', source: 'thumbtack', raw_value: 'Tree Stump Grinding and Removal' },
@@ -296,4 +298,26 @@ test('validateTemplateBody: rejects empty, accepts content (incl emoji)', () => 
   const ok = validateTemplateBody('Hi! 🌳 pricing…');
   assert.equal(ok.ok, true);
   assert.equal(ok.value, 'Hi! 🌳 pricing…');
+});
+
+test('autoreplySource: maps group prefix to lead source', () => {
+  assert.equal(autoreplySource('autoreply_tt_tree'), 'thumbtack');
+  assert.equal(autoreplySource('autoreply_tt_landscaping'), 'thumbtack');
+  assert.equal(autoreplySource('autoreply_lsa_landscaping'), 'google_lsa');
+  assert.equal(autoreplySource('something_else'), null);
+});
+
+test('pickAutoreplyTemplate: category match wins, else generic fallback', () => {
+  const rows = [
+    { sub_key: 'stump', category_key: 'stump_grinding', body: 'PRICED' },
+    { sub_key: 'generic', category_key: null, body: 'GENERIC' },
+    { sub_key: 'neutral', category_key: null, body: 'NEUTRAL' },
+  ];
+  assert.deepEqual(pickAutoreplyTemplate(rows, 'stump_grinding'), { row: rows[0], matched: true });
+  // resolved-but-no-template category -> generic
+  assert.deepEqual(pickAutoreplyTemplate(rows, 'tree_trimming'), { row: rows[1], matched: false });
+  // no category -> generic
+  assert.deepEqual(pickAutoreplyTemplate(rows, null), { row: rows[1], matched: false });
+  // missing generic -> null row
+  assert.deepEqual(pickAutoreplyTemplate([{ sub_key: 'neutral', category_key: null }], 'x'), { row: null, matched: false });
 });

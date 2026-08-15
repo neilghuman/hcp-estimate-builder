@@ -4,7 +4,7 @@ import { dripConfig, dripReport, getEnrollments, enrollLead, addSuppression, get
   updateMessage, getMessageHistory, setSequenceActive, isDripPaused, setDripPaused,
   addCategoryMap, deleteCategoryMap, updateStep, addMessage, deleteMessage, updateSequence,
   revertMessage, getSuppressions, removeSuppression, createSequence, addStep, deleteStep,
-  getTemplates, getTemplateGroup, updateTemplate, getTemplateHistory, revertTemplate } from './drip_runtime.js';
+  getTemplates, getTemplateGroup, updateTemplate, getTemplateHistory, revertTemplate, resolveAutoreply } from './drip_runtime.js';
 import { sweepOnce, realDripChatwoot, ensurePendingLabel } from './drip_sweep.js';
 import { validateMessage, smsSegments, validateCategoryMap, validateVariant, validateSequenceSettings,
   validateSequenceCreate, validateTemplateBody } from './drip.js';
@@ -200,6 +200,13 @@ export function registerDripRoutes(app, pool) {
 
   app.get('/api/drip/templates/:group', async (req, res) => {
     try { res.json(await getTemplateGroup(pool, req.params.group)); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Taxonomy-driven pick: n8n passes the raw lead category, gets back the matching template body
+  // (or the group's 'generic' fallback). Ties auto-replies to the same drip_category_map as drips.
+  app.get('/api/drip/autoreply/:group/resolve', async (req, res) => {
+    try { res.json(await resolveAutoreply(pool, req.params.group, req.query.category)); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
