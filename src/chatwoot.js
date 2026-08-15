@@ -182,6 +182,36 @@ export async function sendMessage(conversationId, content) {
   return { id: data && (data.id ?? (data.data && data.data.id)) ? (data.id ?? data.data.id) : null, content: text };
 }
 
+// Fetch a conversation's messages (drip sweep uses this to detect human replies).
+export async function getConversationMessages(conversationId) {
+  const acc = requireAccount();
+  const raw = await cwFetch(`/api/v1/accounts/${acc}/conversations/${Number(conversationId)}/messages`);
+  return (raw && (raw.payload || (raw.data && raw.data.payload))) || [];
+}
+
+// Replace a conversation's labels (Chatwoot's labels API sets the full list).
+export async function setConversationLabels(conversationId, labels) {
+  const acc = requireAccount();
+  await cwFetch(`/api/v1/accounts/${acc}/conversations/${Number(conversationId)}/labels`, {
+    method: 'POST',
+    body: { labels: Array.isArray(labels) ? labels : [] },
+  });
+  return true;
+}
+
+// Post an outgoing message tagged as an automated drip send. The tag
+// (content_attributes.automation) lets the sweep tell its own sends apart from a human reply.
+export async function postDripMessage(conversationId, content, { step } = {}) {
+  const acc = requireAccount();
+  const text = String(content || '').trim();
+  if (!text) throw new ChatwootError('Cannot send an empty message.', 400);
+  const data = await cwFetch(`/api/v1/accounts/${acc}/conversations/${Number(conversationId)}/messages`, {
+    method: 'POST',
+    body: { content: text, message_type: 'outgoing', private: false, content_attributes: { automation: 'drip', step } },
+  });
+  return { id: data && (data.id ?? (data.data && data.data.id)) ? (data.id ?? data.data.id) : null, content: text };
+}
+
 // Find-or-create a conversation to a phone number in the given inbox, returning its id.
 // Used for proactive notifications (e.g. texting the office). Delivery is handled by the existing
 // n8n Telnyx outbound relay once an outgoing message is posted to the conversation.

@@ -22,6 +22,8 @@ import { recoverInterrupted } from './src/cf_sender.js';
 import { loadSettings as loadChatFoundrySettings } from './src/cf_settings.js';
 import { registerIntakeRoutes, recoverInterruptedIntakes } from './src/intake.js';
 import { registerDripRoutes } from './src/drip_routes.js';
+import { startDripSweep } from './src/drip_sweep.js';
+import * as dripChatwoot from './src/chatwoot.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -110,6 +112,12 @@ registerIntakeRoutes(app, pool);
 
 // Lead follow-up drip — enrollment + read/report API (sends gated/added in a later sprint).
 registerDripRoutes(app, pool);
+
+// Lead follow-up drip — background sweep. OFF unless DRIP_SWEEP_ENABLED (and sends need DRIP_SEND_ENABLED).
+if (String(process.env.DRIP_SWEEP_ENABLED ?? 'false').toLowerCase() === 'true') {
+  startDripSweep(pool, dripChatwoot);
+  console.log('✓ Drip sweep scheduler started');
+}
 
 // Customer Intake — quarantine any intake left mid-submit by a restart (idempotent; re-submit resumes).
 recoverInterruptedIntakes(pool).then((r) => {
