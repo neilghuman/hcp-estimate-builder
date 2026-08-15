@@ -130,6 +130,23 @@ test('sweepOnce skips when the conversation snapshot cannot be read', async () =
   assert.equal(res[0].action, 'skip_no_snapshot');
 });
 
+test('sweepOnce sends past a pre-enrollment lead + welcome (does not false-stop)', async () => {
+  const t0Sec = Math.floor(new Date(baseEnrollment.t0_at).getTime() / 1000);
+  const conv = {
+    status: 'open', labels: ['A_pending_callback'],
+    messages: [
+      { message_type: 0, created_at: t0Sec - 120 },                                          // inbound lead (pre-T0)
+      { message_type: 1, private: false, content_attributes: {}, created_at: t0Sec - 30 },   // welcome, untagged (pre-T0)
+    ],
+  };
+  const pool = mockPool(sweepRoutes(baseEnrollment));
+  let sent = null;
+  const chatwoot = { getSnapshot: async () => conv, send: async (cid, body) => { sent = body; return { id: 'm1' }; }, removeLabel: async () => {} };
+  const res = await sweepOnce(pool, { chatwoot, now: NOON_PDT, dryRun: false });
+  assert.equal(res[0].action, 'sent');
+  assert.ok(sent);
+});
+
 test('sweepOnce exits undeliverable + removes label when the send fails', async () => {
   const pool = mockPool(sweepRoutes(baseEnrollment));
   let removed = false;

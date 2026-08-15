@@ -146,3 +146,41 @@ test('evaluateStop: private note is ignored (continues)', () => {
   };
   assert.equal(evaluateStop(conv), null);
 });
+
+const T0 = '2026-08-14T18:00:00Z';
+const T0_SEC = Math.floor(new Date(T0).getTime() / 1000);
+
+test('evaluateStop: pre-enrollment lead + welcome are ignored with since (continues)', () => {
+  const conv = {
+    status: 'open', labels: ['A_pending_callback'],
+    messages: [
+      { message_type: 0, created_at: T0_SEC - 120 },                      // inbound lead
+      { message_type: 1, private: false, content_attributes: {}, created_at: T0_SEC - 60 }, // welcome (untagged)
+    ],
+  };
+  assert.equal(evaluateStop(conv, { since: T0 }), null);
+});
+
+test('evaluateStop: a customer reply after since stops', () => {
+  const conv = {
+    status: 'open', labels: ['A_pending_callback'],
+    messages: [
+      { message_type: 0, created_at: T0_SEC - 120 },   // pre-enrollment lead, ignored
+      { message_type: 0, created_at: T0_SEC + 300 },   // real reply after T0
+    ],
+  };
+  assert.equal(evaluateStop(conv, { since: T0 }), 'human_response');
+});
+
+test('evaluateStop: an agent (untagged) reply after since stops; our tagged drip send does not', () => {
+  const conv = {
+    status: 'open', labels: ['A_pending_callback'],
+    messages: [
+      { message_type: 1, private: false, content_attributes: { automation: 'drip' }, created_at: T0_SEC + 60 },
+      { message_type: 1, private: false, content_attributes: {}, created_at: T0_SEC + 120 },
+    ],
+  };
+  assert.equal(evaluateStop(conv, { since: T0 }), 'human_response');
+  const convDripOnly = { ...conv, messages: [conv.messages[0]] };
+  assert.equal(evaluateStop(convDripOnly, { since: T0 }), null);
+});
