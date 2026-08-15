@@ -94,6 +94,22 @@
       </div>
     </section>
 
+    <!-- Suppression list (opt-outs / DNC) -->
+    <section class="card">
+      <h2>Suppression list</h2>
+      <p class="hint">Numbers that will never be enrolled or messaged (opt-outs / do-not-contact). Highest precedence.</p>
+      <div class="fu-table-wrap">
+        <table class="fu-table" id="supTable">
+          <thead>
+            <tr><th>Phone</th><th>Reason</th><th>Source</th><th>Added</th><th></th></tr>
+          </thead>
+          <tbody id="supBody"></tbody>
+        </table>
+        <p id="supEmpty" class="hint" hidden>No suppressed numbers.</p>
+      </div>
+      <div id="supAdd" class="fu-taxadd" hidden></div>
+    </section>
+
     <!-- Taxonomy -->
     <section class="card">
       <h2>Category taxonomy</h2>

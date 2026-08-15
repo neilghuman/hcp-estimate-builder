@@ -166,3 +166,9 @@
   background: var(--control-bg); color: var(--control-text); border: 1px solid var(--control-border);
 }
 .fu-seq-settings input[type="number"] { width: 4.5rem; }
+
+/* Version history */
+.fu-history { display: flex; flex-direction: column; gap: 0.5rem; }
+.fu-hist-row { padding: 0.5rem 0.6rem; border-radius: 8px; background: var(--surface-soft); border: 1px solid var(--border-soft); }
+.fu-hist-meta { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.25rem; }
+.fu-hist-body { font-size: 0.85rem; color: var(--text); white-space: pre-wrap; margin-bottom: 0.4rem; }
