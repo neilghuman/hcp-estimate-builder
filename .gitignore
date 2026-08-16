@@ -7,3 +7,27 @@ uploads/
 .DS_Store
 _image_review/
 backups/
+Thumbs.db
+desktop.ini
+~$*
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+prodkey.txt
+
+# Database backups (use backup system instead)
+_cf_backups/*.dump
+_cf_backups/*.sql
+
+# Build artifacts
+.next/
+dist/
+build/
+*.lock
+
+# Development cache
+.turbo/
+.cache/
