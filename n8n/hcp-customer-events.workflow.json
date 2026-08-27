@@ -1,0 +1,831 @@
+{
+  "name": "HCP Customer Events",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hcp-customer-events",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "b582791d-a2a6-42fe-bdec-959972668da4",
+      "name": "HCP Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        304
+      ],
+      "webhookId": "237e5ed9-fd74-471d-8fc8-fb96027cc84c"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\r\nfor (const item of $input.all()) {\r\n  let raw = '';\r\n  const bin = item.binary && item.binary.data ? item.binary.data : null;\r\n  if (bin && typeof bin.data === 'string') {\r\n    raw = Buffer.from(bin.data, 'base64').toString('utf8');\r\n  } else if (typeof item.json.rawBody === 'string') {\r\n    raw = item.json.rawBody;\r\n  }\r\n  out.push({ json: { ...item.json, rawBody: raw }, binary: item.binary });\r\n}\r\nreturn out;"
+      },
+      "id": "a3333333-3333-4333-8333-333333333333",
+      "name": "Attach Raw Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        128,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-sig-1",
+              "leftValue": "={{ $json.headers['api-signature'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1111111-1111-4111-8111-111111111111",
+      "name": "Skip If No Signature",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "BXnDybdusVc0hlDx"
+        },
+        "options": {}
+      },
+      "id": "a2222222-2222-4222-8222-222222222222",
+      "name": "Verify Signature",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-evt-1",
+              "leftValue": "={{ $('HCP Webhook').item.json.body.event }}",
+              "rightValue": "customer.created",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ab000000-0000-4000-8000-00000000c001",
+      "name": "Is Customer Created",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        640,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-evt-2",
+              "leftValue": "={{ $('HCP Webhook').item.json.body.event }}",
+              "rightValue": "customer.updated",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ab000000-0000-4000-8000-00000000c002",
+      "name": "Is Customer Updated",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        640,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $('HCP Webhook').item.json;\r\nconst body = root.body || root;\r\nconst ev = body.event || '';\r\nconst c = body.customer || {};\r\n\r\nconst customer_id   = (c.id != null) ? String(c.id) : '';\r\nconst customer_first = String(c.first_name || '').trim();\r\nconst customer_last  = String(c.last_name  || '').trim();\r\nconst customer_email = String(c.email || '').trim();\r\nconst customer_phone = String(c.mobile_number || c.home_number || c.work_number || '').trim();\r\nconst lead_source    = String(c.lead_source || '').trim();\r\nconst tags = Array.isArray(c.tags) ? c.tags : [];\r\n\r\n// EXACT (case-insensitive) vertical-tag resolver. Returns null when NO vertical\r\n// tag is present (=> start the internal classification chase). Never substring\r\n// (so \"TREE_CODE_RESEARCH\" does NOT match). Umbrella tag -> 'general'.\r\nconst TAGMAP = {\r\n  'tree': 'tree',\r\n  'roofing': 'roofing',\r\n  'landscaping': 'landscaping',\r\n  'construction': 'construction',\r\n  'united services northwest': 'general',\r\n};\r\nfunction resolveVertical() {\r\n  for (const t of tags) {\r\n    const tt = String(t || '').trim().toLowerCase();\r\n    if (Object.prototype.hasOwnProperty.call(TAGMAP, tt)) return TAGMAP[tt];\r\n  }\r\n  return null;\r\n}\r\nconst vertical = resolveVertical();\r\nconst route = vertical ? 'tagged' : 'untagged';\r\n\r\nconst senderMap = {\r\n  tree:         'sales@washingtontreeservices.com',\r\n  roofing:      'sales@washingtonroofing.com',\r\n  landscaping:  'sales@washingtonlandscaping.com',\r\n  construction: 'sales@washingtonconstruction.com',\r\n  general:      'sales@unitedservicesnorthwest.com',\r\n};\r\nconst would_send_from = senderMap[vertical] || senderMap.general;\r\n\r\nconst SHADOW = false;\r\nconst would_send_to = customer_email;                               // real recipient (banner only)\r\nconst send_target   = SHADOW ? 'neil@neilghuman.com' : customer_email;\r\n\r\nreturn [{ json: {\r\n  customer_id,\r\n  customer_first,\r\n  customer_last,\r\n  customer_email,\r\n  customer_phone,\r\n  lead_source,\r\n  tags,\r\n  vertical,                                   // may be null (untagged)\r\n  route,                                      // 'tagged' | 'untagged'\r\n  notification_type: route === 'tagged' ? 'welcome' : 'classify',\r\n  would_send: false,                          // receiver no longer sends\r\n  would_send_from,\r\n  would_send_to,\r\n  send_target,\r\n  shadow: SHADOW,\r\n  event: ev,\r\n  occurred_at: body.event_occurred_at || null,\r\n  company_id: (body.company_id != null) ? String(body.company_id) : null,\r\n  raw_payload: body,\r\n  n8n_workflow: 'HCP Customer Events',\r\n  n8n_execution_id: $execution.id,\r\n}}];"
+      },
+      "id": "a3333333-3333-4333-8333-333333333333",
+      "name": "Build Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO events\r\n  (occurred_at, event, company_id, customer_id, signature_valid, notification_type, vertical,\r\n   customer_first, customer_last, customer_email, customer_phone,\r\n   would_send, would_send_from, would_send_to, raw_payload, n8n_workflow, n8n_execution_id)\r\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)\r\nRETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Payload').item.json.occurred_at, $('Build Payload').item.json.event, $('Build Payload').item.json.company_id, $('Build Payload').item.json.customer_id, true, $('Build Payload').item.json.notification_type, $('Build Payload').item.json.vertical, $('Build Payload').item.json.customer_first, $('Build Payload').item.json.customer_last, $('Build Payload').item.json.customer_email, $('Build Payload').item.json.customer_phone, $('Build Payload').item.json.would_send, $('Build Payload').item.json.would_send_from, $('Build Payload').item.json.would_send_to, JSON.stringify($('Build Payload').item.json.raw_payload), $('Build Payload').item.json.n8n_workflow, $('Build Payload').item.json.n8n_execution_id ] }}"
+        }
+      },
+      "id": "a4444444-4444-4444-8444-444444444444",
+      "name": "Log Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1088,
+        192
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-tag-c",
+              "leftValue": "={{ $('Build Payload').item.json.route }}",
+              "rightValue": "tagged",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a5000000-0000-4000-8000-000000000t01",
+      "name": "Is Tagged",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-tag-u",
+              "leftValue": "={{ $('Build Payload').item.json.route }}",
+              "rightValue": "untagged",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a5000000-0000-4000-8000-000000000t02",
+      "name": "Is Untagged",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_sends\r\n  (customer_id, notification_type, vertical, send_to, customer_first, status, nudge_count, claimed_at, next_action_at)\r\nSELECT $1, 'welcome', $2, $3, $4, 'pending', 0, now(), now()\r\nWHERE $3 IS NOT NULL AND btrim($3) <> ''\r\nON CONFLICT (customer_id, notification_type) DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Payload').item.json.customer_id, $('Build Payload').item.json.vertical ?? null, $('Build Payload').item.json.would_send_to ?? null, $('Build Payload').item.json.customer_first ?? null ] }}"
+        }
+      },
+      "id": "a6000000-0000-4000-8000-0000000000w1",
+      "name": "Enqueue Welcome",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_sends\r\n  (customer_id, notification_type, vertical, send_to, customer_first, status, nudge_count, claimed_at, next_action_at)\r\nSELECT $1, 'heads_up', $2, $3, $4, 'pending', 0, now(), now() + interval '24 hours'\r\nWHERE $3 IS NOT NULL AND btrim($3) <> ''\r\nON CONFLICT (customer_id, notification_type) DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Payload').item.json.customer_id, $('Build Payload').item.json.vertical ?? null, $('Build Payload').item.json.would_send_to ?? null, $('Build Payload').item.json.customer_first ?? null ] }}"
+        }
+      },
+      "id": "a6000000-0000-4000-8000-0000000000h1",
+      "name": "Enqueue Heads-Up",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_sends\r\n  (customer_id, notification_type, vertical, send_to, customer_first, status, nudge_count, claimed_at, next_action_at)\r\nVALUES ($1, 'classify', NULL, $2, $3, 'pending', 0, now(), now())\r\nON CONFLICT (customer_id, notification_type) DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Payload').item.json.customer_id, $('Build Payload').item.json.would_send_to ?? null, $('Build Payload').item.json.customer_first ?? null ] }}"
+        }
+      },
+      "id": "a6000000-0000-4000-8000-0000000000z1",
+      "name": "Enqueue Classify",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://autostaging.unitedservicesnorthwest.com/webhook/hcp-sweep-now",
+        "options": {}
+      },
+      "id": "a6000000-0000-4000-8000-0000000000ks",
+      "name": "Kick Sweeper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $('HCP Webhook').item.json;\r\nconst body = root.body || root;\r\nconst ev = body.event || '';\r\nconst c = body.customer || {};\r\nconst customer_id   = (c.id != null) ? String(c.id) : '';\r\nconst customer_first = String(c.first_name || '').trim();\r\nconst customer_last  = String(c.last_name  || '').trim();\r\nconst customer_email = String(c.email || '').trim();\r\nconst customer_phone = String(c.mobile_number || c.home_number || c.work_number || '').trim();\r\nconst tags = Array.isArray(c.tags) ? c.tags : [];\r\n\r\nconst TAGMAP = {\r\n  'tree': 'tree',\r\n  'roofing': 'roofing',\r\n  'landscaping': 'landscaping',\r\n  'construction': 'construction',\r\n  'united services northwest': 'general',\r\n};\r\nfunction resolveVertical() {\r\n  for (const t of tags) {\r\n    const tt = String(t || '').trim().toLowerCase();\r\n    if (Object.prototype.hasOwnProperty.call(TAGMAP, tt)) return TAGMAP[tt];\r\n  }\r\n  return null;\r\n}\r\nconst vertical = resolveVertical();\r\nconst route = vertical ? 'tagged' : 'untagged';\r\n\r\nreturn [{ json: {\r\n  customer_id, customer_first, customer_last, customer_email, customer_phone,\r\n  tags, vertical, route,\r\n  notification_type: 'update',\r\n  would_send_to: customer_email,\r\n  event: ev,\r\n  occurred_at: body.event_occurred_at || null,\r\n  company_id: (body.company_id != null) ? String(body.company_id) : null,\r\n  raw_payload: body,\r\n  n8n_workflow: 'HCP Customer Events',\r\n  n8n_execution_id: $execution.id,\r\n}}];"
+      },
+      "id": "cc000000-0000-4000-8000-0000000000u1",
+      "name": "Build Update Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO events\r\n  (occurred_at, event, company_id, customer_id, signature_valid, notification_type, vertical,\r\n   customer_first, customer_last, customer_email, customer_phone,\r\n   would_send, would_send_from, would_send_to, raw_payload, n8n_workflow, n8n_execution_id)\r\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)\r\nRETURNING id",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Update Payload').item.json.occurred_at, $('Build Update Payload').item.json.event, $('Build Update Payload').item.json.company_id, $('Build Update Payload').item.json.customer_id, true, $('Build Update Payload').item.json.notification_type, $('Build Update Payload').item.json.vertical, $('Build Update Payload').item.json.customer_first, $('Build Update Payload').item.json.customer_last, $('Build Update Payload').item.json.customer_email, $('Build Update Payload').item.json.customer_phone, false, null, null, JSON.stringify($('Build Update Payload').item.json.raw_payload), $('Build Update Payload').item.json.n8n_workflow, $('Build Update Payload').item.json.n8n_execution_id ] }}"
+        }
+      },
+      "id": "cc000000-0000-4000-8000-0000000000u2",
+      "name": "Log Event Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1088,
+        624
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-tag-up",
+              "leftValue": "={{ $('Build Update Payload').item.json.route }}",
+              "rightValue": "tagged",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cc000000-0000-4000-8000-0000000000u3",
+      "name": "Is Tagged Update",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE email_sends\r\n   SET status = 'done', next_action_at = NULL, updated_at = now()\r\n WHERE customer_id = $1 AND notification_type = 'classify' AND status = 'pending'",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Update Payload').item.json.customer_id ] }}"
+        }
+      },
+      "id": "cc000000-0000-4000-8000-0000000000c4",
+      "name": "Close Classify",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        512
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_sends\r\n  (customer_id, notification_type, vertical, send_to, customer_first, status, nudge_count, claimed_at, next_action_at)\r\nSELECT $1, 'welcome', $2, $3, $4, 'pending', 0, now(), now()\r\nWHERE $3 IS NOT NULL AND btrim($3) <> ''\r\nON CONFLICT (customer_id, notification_type) DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Update Payload').item.json.customer_id, $('Build Update Payload').item.json.vertical ?? null, $('Build Update Payload').item.json.would_send_to ?? null, $('Build Update Payload').item.json.customer_first ?? null ] }}"
+        }
+      },
+      "id": "cc000000-0000-4000-8000-0000000000w2",
+      "name": "Enqueue Welcome U",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        672
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO email_sends\r\n  (customer_id, notification_type, vertical, send_to, customer_first, status, nudge_count, claimed_at, next_action_at)\r\nSELECT $1, 'heads_up', $2, $3, $4, 'pending', 0, now(), now() + interval '24 hours'\r\nWHERE $3 IS NOT NULL AND btrim($3) <> ''\r\nON CONFLICT (customer_id, notification_type) DO NOTHING",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Update Payload').item.json.customer_id, $('Build Update Payload').item.json.vertical ?? null, $('Build Update Payload').item.json.would_send_to ?? null, $('Build Update Payload').item.json.customer_first ?? null ] }}"
+        }
+      },
+      "id": "cc000000-0000-4000-8000-0000000000h2",
+      "name": "Enqueue Heads-Up U",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1552,
+        832
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE email_sends\r\n   SET send_to        = $2,\r\n       status         = CASE WHEN status = 'sent' THEN 'pending' ELSE status END,\r\n       sent_at        = CASE WHEN status = 'sent' THEN NULL ELSE sent_at END,\r\n       next_action_at = CASE WHEN status = 'sent' THEN now()  ELSE next_action_at END,\r\n       updated_at     = now()\r\n WHERE customer_id = $1\r\n   AND notification_type IN ('welcome', 'heads_up')\r\n   AND status IN ('pending', 'sent')\r\n   AND $2 <> ''\r\n   AND send_to IS DISTINCT FROM $2",
+        "options": {
+          "queryReplacement": "={{ [ $('Build Update Payload').item.json.customer_id, $('Build Update Payload').item.json.customer_email ?? null ] }}"
+        }
+      },
+      "id": "cc000000-0000-4000-8000-0000000000r1",
+      "name": "Reconcile Email",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1312,
+        992
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "qdiSPuesLNmp2i2z",
+          "name": "Postgres HCP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-other-1",
+              "leftValue": "={{ $('HCP Webhook').item.json.body.event }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "cond-other-2",
+              "leftValue": "={{ $('HCP Webhook').item.json.body.event }}",
+              "rightValue": "customer.created",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "cond-other-3",
+              "leftValue": "={{ $('HCP Webhook').item.json.body.event }}",
+              "rightValue": "customer.updated",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ee000000-0000-4000-8000-0000000000o1",
+      "name": "Is Other Event",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        640,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $('HCP Webhook').item.json;\r\nconst body = root.body || root;\r\nconst ev = body.event || '(unknown)';\r\nconst company_id  = (body.company_id != null) ? String(body.company_id) : '';\r\nconst occurred_at = body.event_occurred_at || '';\r\n\r\n// Surface a primary entity + id for the subject line, when present.\r\nconst entityKeys = ['estimate', 'job', 'invoice', 'lead', 'customer', 'appointment'];\r\nlet entity = '', entityId = '';\r\nfor (const k of entityKeys) {\r\n  if (body[k] && typeof body[k] === 'object') {\r\n    entity = k;\r\n    entityId = (body[k].id != null) ? String(body[k].id) : '';\r\n    break;\r\n  }\r\n}\r\n\r\nconst esc = (s) => String(s == null ? '' : s)\r\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\r\n\r\nlet pretty = JSON.stringify(body, null, 2);\r\nif (pretty.length > 50000) pretty = pretty.slice(0, 50000) + '\\n... (truncated)';\r\n\r\nconst emailSubject = '[HCP Event] ' + ev + (entity ? (' \\u2014 ' + entity + (entityId ? ' ' + entityId : '')) : '');\r\n\r\nconst rows = [\r\n  ['Event', ev],\r\n  ['Entity', entity ? (entity + (entityId ? ' ' + entityId : '')) : '(n/a)'],\r\n  ['Occurred at', occurred_at],\r\n  ['Company', company_id],\r\n  ['n8n execution', String($execution.id)],\r\n];\r\nconst rowHtml = rows.map(r =>\r\n  '<tr><td style=\"padding:4px 12px 4px 0;color:#6b7280;font-weight:600;white-space:nowrap;\">' + esc(r[0]) +\r\n  '</td><td style=\"padding:4px 0;color:#111827;\">' + esc(r[1]) + '</td></tr>'\r\n).join('');\r\n\r\nconst emailHtml =\r\n  '<div style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#111827;\">' +\r\n  '<h2 style=\"margin:0 0 12px;font-size:18px;\">HCP webhook captured</h2>' +\r\n  '<table style=\"border-collapse:collapse;margin-bottom:16px;\">' + rowHtml + '</table>' +\r\n  '<div style=\"color:#6b7280;font-size:12px;margin-bottom:6px;\">Full payload:</div>' +\r\n  '<pre style=\"background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:12px;' +\r\n  'font-size:12px;line-height:1.4;overflow:auto;white-space:pre-wrap;word-break:break-word;\">' +\r\n  esc(pretty) + '</pre></div>';\r\n\r\nreturn [{ json: { event: ev, entity, entityId, emailSubject, emailHtml } }];"
+      },
+      "id": "ee000000-0000-4000-8000-0000000000o2",
+      "name": "Build Event Notice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "neil@neilghuman.com",
+        "subject": "={{ $json.emailSubject }}",
+        "bodyContent": "={{ $json.emailHtml }}",
+        "additionalFields": {
+          "from": "sales@unitedservicesnorthwest.com",
+          "bodyContentType": "html"
+        }
+      },
+      "id": "ee000000-0000-4000-8000-0000000000o3",
+      "name": "Send Event Notice",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        1072
+      ],
+      "webhookId": "56fe3584-d6d6-4dc6-8a8b-d869c260c6a7",
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "jPHs0HE5ksShtrty",
+          "name": "Microsoft Outlook account"
+        }
+      },
+      "disabled": true,
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HCP Webhook": {
+      "main": [
+        [
+          {
+            "node": "Attach Raw Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Raw Body": {
+      "main": [
+        [
+          {
+            "node": "Skip If No Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip If No Signature": {
+      "main": [
+        [
+          {
+            "node": "Verify Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Signature": {
+      "main": [
+        [
+          {
+            "node": "Is Customer Created",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Customer Updated",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Other Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Customer Created": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Event": {
+      "main": [
+        [
+          {
+            "node": "Is Tagged",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Untagged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Tagged": {
+      "main": [
+        [
+          {
+            "node": "Enqueue Welcome",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Enqueue Heads-Up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enqueue Welcome": {
+      "main": [
+        [
+          {
+            "node": "Kick Sweeper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Untagged": {
+      "main": [
+        [
+          {
+            "node": "Enqueue Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Customer Updated": {
+      "main": [
+        [
+          {
+            "node": "Build Update Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Update Payload": {
+      "main": [
+        [
+          {
+            "node": "Log Event Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Event Update": {
+      "main": [
+        [
+          {
+            "node": "Is Tagged Update",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Reconcile Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Tagged Update": {
+      "main": [
+        [
+          {
+            "node": "Close Classify",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Enqueue Welcome U",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Enqueue Heads-Up U",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enqueue Welcome U": {
+      "main": [
+        [
+          {
+            "node": "Kick Sweeper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Other Event": {
+      "main": [
+        [
+          {
+            "node": "Build Event Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Event Notice": {
+      "main": [
+        [
+          {
+            "node": "Send Event Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b313b6ec-5015-44be-b228-f96c208b60a5",
+  "meta": {
+    "instanceId": "57f19b6c71d1ef0b9c3c2753d8a867bdaf9854fd2eebcd9a0311d63407b7f77c"
+  },
+  "id": "49YZrBbbAJRCIfcx",
+  "tags": []
+}
