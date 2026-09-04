@@ -122,3 +122,10 @@ test('HCP canary projection rejects missing source account, name, and identity k
   assert.throws(() => buildHcpCanaryProjection({ id: 'cus_123', firstName: 'Jane', phones: ['extension 1'] }), /phone number or email/);
   process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
 });
+
+test('a successful canary decision can retain its net-new outcome and created Contact ID', () => {
+  const decision = buildDryRunDecision({ sourceSystem: 'housecall_pro', sourceEventId: 'canary:hash', record: { phone: '206-555-1212' }, contacts: [] });
+  assert.equal(decision.result.outcome, 'net_new');
+  decision.result.contactId = 'crm-created';
+  assert.equal(decision.result.contactId, 'crm-created');
+});

@@ -71,6 +71,7 @@ export function registerEngagementRoutes(app, pool) {
       if (decision.result.outcome !== 'net_new') return res.status(409).json({ error: `Canary requires a net_new HCP customer; resolver returned ${decision.result.outcome}.`, result: decision.result });
       const created = await createCanaryContactAndLink(buildHcpCanaryProjection(customer));
       decision.sourceEventId = `canary:${fingerprint(customer.id)}`;
+      decision.result.contactId = created.contactId;
       await recordDryRunDecision(pool, decision);
       return res.status(201).json({ canary: true, hcpCustomerIdHash: fingerprint(customer.id), contactId: created.contactId, externalIdentityLinkId: created.linkId, linkStatus: 'Provisional' });
     } catch (error) {
