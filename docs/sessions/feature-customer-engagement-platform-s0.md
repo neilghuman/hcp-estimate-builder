@@ -81,6 +81,24 @@ and provisional matching, conflicts, ambiguous identifiers, HCP name mismatch, a
 	audit records in the integration ledger.
 - The focused identity suite passed 11/11 after this slice was added.
 
+## Disabled Production Release
+
+Deployed to `10.0.10.102` on 2026-09-04 from release commit `c14ae654` after the backup set
+above had been verified. The direct-copy deployment had source drift from the repository, so only
+the validated Sprint 0 patch and new files were applied before rebuilding `hcp-estimate-builder`.
+
+- Migration registry confirms `033_engagement_identity_foundation.sql` and
+	`034_engagement_reconciliation_runs.sql` applied successfully.
+- Verified tables: `integration_events`, `identity_resolution_audits`, `integration_outbox`, and
+	`identity_reconciliation_runs`.
+- `GET /api/integrations/identity/config` reports `configured=true`,
+	`identityWritesEnabled=false`, `reconciliationEnabled=false`, and
+	`espocrmConfigured=false`.
+- A dedicated 64-hex-character integration API key was generated directly into the server-side
+	production `.env`; it was not displayed or committed.
+- No EspoCRM credential is configured in the gateway yet, and the HCP reconciliation endpoint
+	remains unavailable until `ENGAGEMENT_RECONCILIATION_ENABLED=true` is explicitly set.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
