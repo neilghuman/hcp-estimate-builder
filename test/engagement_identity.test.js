@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { namesMateriallyDifferent, normalizeEmail, normalizePhone, resolveIdentity } from '../src/engagement_identity.js';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, fingerprint, selectHcpCanaryCandidates, summarizeReconciliation } from '../src/engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, compareContactAddress, fingerprint, selectHcpCanaryCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from '../src/engagement_runtime.js';
 
 const contact = {
   id: 'crm-1',
@@ -153,4 +153,30 @@ test('HCP batch canary skips records that match a Contact or lack a usable ident
   assert.equal(batch.selected[0].customer.id, 'new');
   assert.deepEqual(batch.skipped, { provisional: 1, malformed_or_no_key: 1 });
   process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
+});
+
+test('address selection prefers one service address and falls back to one billing address', () => {
+  const service = { id: 'adr-service', type: 'service', street: '1 Main St', city: 'Seattle', state: 'WA', zip: '98101', country: 'US' };
+  const billing = { id: 'adr-billing', type: 'billing', street: '2 Main St', city: 'Seattle', state: 'WA', zip: '98102', country: 'US' };
+  assert.equal(selectPrimaryHcpAddress([billing, service]).status, 'selected_service');
+  assert.equal(selectPrimaryHcpAddress([billing]).status, 'selected_billing_fallback');
+  assert.equal(selectPrimaryHcpAddress([service, { ...service, id: 'adr-service-2' }]).status, 'ambiguous_multiple_service_addresses');
+});
+
+test('address comparison only permits a blank CRM address or reports an exact match', () => {
+  const candidate = selectPrimaryHcpAddress([{ id: 'adr-1', type: 'service', street: '1 Main St', city: 'Seattle', state: 'WA', zip: '98101', country: 'US' }]).address;
+  assert.equal(compareContactAddress({}, candidate).status, 'crm_blank');
+  assert.equal(compareContactAddress({ addressStreet: '1  Main St', addressCity: 'Seattle', addressState: 'WA', addressPostalCode: '98101' }, candidate).status, 'match');
+  assert.equal(compareContactAddress({ addressStreet: '9 Other St', addressCity: 'Seattle', addressState: 'WA', addressPostalCode: '98101' }, candidate).status, 'conflict');
+});
+
+test('address audit summarizes selected, blank, and ambiguous address states without raw values', () => {
+  const report = summarizeAddressAudit([
+    { contactId: 'crm-1', linkId: 'link-1', contact: {}, addresses: [{ id: 'adr-1', type: 'billing', street: '1 Main St', city: 'Seattle', state: 'WA', zip: '98101' }] },
+    { contactId: 'crm-2', linkId: 'link-2', contact: {}, addresses: [{ id: 'adr-2', type: 'service', street: '1 Main St', city: 'Seattle', state: 'WA', zip: '98101' }, { id: 'adr-3', type: 'service', street: '2 Main St', city: 'Seattle', state: 'WA', zip: '98102' }] },
+  ]);
+  assert.equal(report.counts.crm_blank, 1);
+  assert.equal(report.counts.ambiguous_multiple_service_addresses, 1);
+  assert.equal(report.examples[0].hcpAddressIdHash, fingerprint('adr-1'));
+  assert.equal(JSON.stringify(report).includes('1 Main St'), false);
 });

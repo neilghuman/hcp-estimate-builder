@@ -119,3 +119,12 @@ export async function createCanaryContactAndLink({ contact, link }) {
     throw error;
   }
 }
+
+export async function getContactForAddressAudit(contactId) {
+  return get(`/Contact/${encodeURIComponent(contactId)}`);
+}
+
+export async function listProvisionalHcpIdentityLinks() {
+  const data = await get('/ExternalIdentityLink?maxSize=200');
+  return (data?.list || []).filter((link) => link.sourceSystem === 'HousecallPro' && link.linkStatus === 'Provisional');
+}

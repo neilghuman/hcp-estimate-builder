@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordDryRunDecision, selectHcpCanaryCandidates, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, getEspoCrmInventory, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation } from './engagement_espocrm.js';
-import { getCustomerForReconciliation, listCustomersForReconciliation } from './hcp.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordDryRunDecision, selectHcpCanaryCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, getContactForAddressAudit, getEspoCrmInventory, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
   const left = Buffer.from(String(actual || ''));
@@ -45,6 +45,20 @@ export function registerEngagementRoutes(app, pool) {
       if (runId) await finishReconciliationRun(pool, runId, { errorCode: 'reconciliation_failed' }).catch(() => {});
       return res.status(error.status || 500).json({ error: error.message });
     }
+  });
+
+  app.post('/api/integrations/identity/audit-addresses/hcp-canaries', requireIntegrationAuth, async (_req, res) => {
+    if (!engagementConfig().reconciliationEnabled) return res.status(403).json({ error: 'ENGAGEMENT_RECONCILIATION_ENABLED is off.' });
+    try {
+      const links = await listProvisionalHcpIdentityLinks();
+      const rows = await Promise.all(links.map(async (link) => ({
+        contactId: link.contactId,
+        linkId: link.id,
+        contact: await getContactForAddressAudit(link.contactId),
+        addresses: await listCustomerAddresses(link.externalId),
+      })));
+      return res.json({ dryRun: true, sourceSystem: 'housecall_pro', scope: 'provisional_identity_links', ...summarizeAddressAudit(rows) });
+    } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
   });
 
   app.post('/api/integrations/identity/dry-run', requireIntegrationAuth, async (req, res) => {

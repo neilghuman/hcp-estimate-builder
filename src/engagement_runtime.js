@@ -171,3 +171,62 @@ export function selectHcpCanaryCandidates(customers, contacts, { limit = 10 } = 
   }
   return { selected, skipped, limit: cappedLimit };
 }
+
+function normalizeAddressPart(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function normalizeHcpAddress(address) {
+  if (!address || !address.street || !address.city || !address.state || !address.zip) return null;
+  return {
+    id: String(address.id || ''),
+    type: String(address.type || '').toLowerCase(),
+    street: String(address.street).trim(),
+    city: String(address.city).trim(),
+    state: String(address.state).trim(),
+    postalCode: String(address.zip).trim(),
+    country: String(address.country || 'US').trim(),
+  };
+}
+
+export function selectPrimaryHcpAddress(addresses) {
+  const complete = (addresses || []).map(normalizeHcpAddress).filter(Boolean);
+  const services = complete.filter((address) => address.type === 'service');
+  const billings = complete.filter((address) => address.type === 'billing');
+  if (services.length === 1) return { status: 'selected_service', address: services[0] };
+  if (services.length > 1) return { status: 'ambiguous_multiple_service_addresses', address: null };
+  if (billings.length === 1) return { status: 'selected_billing_fallback', address: billings[0] };
+  if (billings.length > 1 || complete.length > 1) return { status: 'ambiguous_multiple_addresses', address: null };
+  return { status: 'no_complete_address', address: null };
+}
+
+export function compareContactAddress(contact, hcpAddress) {
+  if (!hcpAddress) return { status: 'no_candidate' };
+  const crm = {
+    street: String(contact?.addressStreet || '').trim(),
+    city: String(contact?.addressCity || '').trim(),
+    state: String(contact?.addressState || '').trim(),
+    postalCode: String(contact?.addressPostalCode || '').trim(),
+    country: String(contact?.addressCountry || '').trim(),
+  };
+  const crmBlank = Object.values(crm).every((value) => !value);
+  if (crmBlank) return { status: 'crm_blank', candidate: hcpAddress };
+  const matches = normalizeAddressPart(crm.street) === normalizeAddressPart(hcpAddress.street)
+    && normalizeAddressPart(crm.city) === normalizeAddressPart(hcpAddress.city)
+    && normalizeAddressPart(crm.state) === normalizeAddressPart(hcpAddress.state)
+    && normalizeAddressPart(crm.postalCode) === normalizeAddressPart(hcpAddress.postalCode);
+  return { status: matches ? 'match' : 'conflict', candidate: hcpAddress };
+}
+
+export function summarizeAddressAudit(rows) {
+  const counts = { total: 0, crm_blank: 0, match: 0, conflict: 0, no_complete_address: 0, ambiguous_multiple_service_addresses: 0, ambiguous_multiple_addresses: 0 };
+  const examples = [];
+  for (const row of rows || []) {
+    counts.total += 1;
+    const selection = selectPrimaryHcpAddress(row.addresses);
+    const outcome = selection.address ? compareContactAddress(row.contact, selection.address).status : selection.status;
+    counts[outcome] = (counts[outcome] || 0) + 1;
+    examples.push({ contactId: row.contactId, linkId: row.linkId, outcome, addressType: selection.address?.type || null, hcpAddressIdHash: selection.address?.id ? fingerprint(selection.address.id) : null });
+  }
+  return { counts, examples };
+}
