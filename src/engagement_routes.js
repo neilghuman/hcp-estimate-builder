@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordAddressProjection, recordDryRunDecision, selectAddressWriteCanary, selectHcpCanaryCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, compareContactAddress, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordAddressProjection, recordDryRunDecision, selectAddressWriteCanary, selectHcpCanaryCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
 import { createCanaryContactAndLink, getContactForAddressAudit, getEspoCrmInventory, updateCanaryContactAddress, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
