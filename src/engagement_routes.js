@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, recordDryRunDecision, summarizeReconciliation } from './engagement_runtime.js';
-import { getEspoCrmInventory, espocrmConfigured, listContactsForReconciliation } from './engagement_espocrm.js';
-import { listCustomersForReconciliation } from './hcp.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordDryRunDecision, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, getEspoCrmInventory, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation } from './engagement_espocrm.js';
+import { getCustomerForReconciliation, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
   const left = Buffer.from(String(actual || ''));
@@ -12,7 +12,7 @@ function credentialsMatch(actual, expected) {
 export function registerEngagementRoutes(app, pool) {
   app.get('/api/integrations/identity/config', (_req, res) => {
     const config = engagementConfig();
-    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, espocrmConfigured: espocrmConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
+    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
   });
 
   const requireIntegrationAuth = (req, res, next) => {
@@ -59,6 +59,22 @@ export function registerEngagementRoutes(app, pool) {
       });
     } catch (error) {
       return res.status(error.status || 500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/integrations/identity/canary/hcp/:customerId', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    try {
+      const customer = await getCustomerForReconciliation(req.params.customerId);
+      const contacts = await listContactsForReconciliation();
+      const decision = buildDryRunDecision({ sourceSystem: 'housecall_pro', sourceEventId: `canary:${customer.id}`, record: customer, contacts });
+      if (decision.result.outcome !== 'net_new') return res.status(409).json({ error: `Canary requires a net_new HCP customer; resolver returned ${decision.result.outcome}.`, result: decision.result });
+      const created = await createCanaryContactAndLink(buildHcpCanaryProjection(customer));
+      decision.sourceEventId = `canary:${fingerprint(customer.id)}`;
+      await recordDryRunDecision(pool, decision);
+      return res.status(201).json({ canary: true, hcpCustomerIdHash: fingerprint(customer.id), contactId: created.contactId, externalIdentityLinkId: created.linkId, linkStatus: 'Provisional' });
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message, contactId: error.contactId || null });
     }
   });
 }

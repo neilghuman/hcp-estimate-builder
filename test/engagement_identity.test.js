@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { namesMateriallyDifferent, normalizeEmail, normalizePhone, resolveIdentity } from '../src/engagement_identity.js';
-import { buildDryRunDecision, buildHcpReconciliationDecisions, fingerprint, summarizeReconciliation } from '../src/engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, fingerprint, summarizeReconciliation } from '../src/engagement_runtime.js';
 
 const contact = {
   id: 'crm-1',
@@ -100,4 +100,25 @@ test('HCP reconciliation decisions use the source customer ID only as an opaque 
   assert.equal(decisions[0].sourceEventId, 'cus_opaque');
   assert.equal(decisions[0].result.outcome, 'provisional');
   assert.equal(decisions[0].normalizedPhoneHash, fingerprint('+12065551212'));
+});
+
+test('HCP canary projection has a minimal Contact and immutable source link', () => {
+  const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
+  const projection = buildHcpCanaryProjection({ id: 'cus_123', firstName: 'Jane', lastName: 'Doe', phones: ['206-555-1212'], email: 'Jane@example.com' });
+  assert.deepEqual(projection.contact, { firstName: 'Jane', lastName: 'Doe', phoneNumber: '+12065551212', emailAddress: 'jane@example.com' });
+  assert.equal(projection.link.sourceSystem, 'HousecallPro');
+  assert.equal(projection.link.sourceAccountId, 'hcp-production-shared');
+  assert.equal(projection.link.linkStatus, 'Provisional');
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
+});
+
+test('HCP canary projection rejects missing source account, name, and identity key', () => {
+  const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  delete process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  assert.throws(() => buildHcpCanaryProjection({ id: 'cus_123', firstName: 'Jane', phones: ['206-555-1212'] }), /SOURCE_ACCOUNT_ID/);
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
+  assert.throws(() => buildHcpCanaryProjection({ id: 'cus_123', phones: ['206-555-1212'] }), /name is required/);
+  assert.throws(() => buildHcpCanaryProjection({ id: 'cus_123', firstName: 'Jane', phones: ['extension 1'] }), /phone number or email/);
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
 });

@@ -108,6 +108,21 @@ export async function getCustomer(id) {
   return simplifyCustomer(c);
 }
 
+// Read one raw HCP customer into the Customer Engagement identity shape. This remains GET-only.
+export async function getCustomerForReconciliation(id) {
+  const customer = await hcp(`/customers/${encodeURIComponent(id)}`);
+  return {
+    id: String(customer.id),
+    firstName: customer.first_name || null,
+    lastName: customer.last_name || null,
+    email: customer.email || null,
+    phones: [customer.mobile_number, customer.home_number, customer.work_number].filter(Boolean),
+    tags: Array.isArray(customer.tags) ? customer.tags : [],
+    createdAt: customer.created_at || null,
+    updatedAt: customer.updated_at || null,
+  };
+}
+
 // Read-only bulk customer shape used by the Customer Engagement Platform's identity dry-run.
 // Keep source values here; the engagement ledger stores only normalized fingerprints.
 export async function listCustomersForReconciliation({ pageSize = 200, maxPages = 50 } = {}) {

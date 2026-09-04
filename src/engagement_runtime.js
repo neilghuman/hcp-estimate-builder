@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { resolveIdentity } from './engagement_identity.js';
+import { normalizeEmail, normalizePhone, resolveIdentity } from './engagement_identity.js';
 
 export function fingerprint(value) {
   return value ? crypto.createHash('sha256').update(String(value)).digest('hex') : null;
@@ -118,4 +118,28 @@ export async function recordDryRunDecision(pool, decision) {
   } finally {
     client.release();
   }
+}
+
+export function buildHcpCanaryProjection(customer) {
+  const firstName = String(customer?.firstName || '').trim();
+  const lastName = String(customer?.lastName || '').trim();
+  const phone = (customer?.phones || []).map((value) => normalizePhone(value, { defaultCountry: engagementConfig().defaultPhoneCountry })).find(Boolean) || null;
+  const email = normalizeEmail(customer?.email);
+  const externalId = String(customer?.id || '').trim();
+  const sourceAccountId = String(process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID || '').trim();
+  if (!externalId) throw Object.assign(new Error('HCP customer ID is required.'), { status: 422 });
+  if (!sourceAccountId) throw Object.assign(new Error('ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID is not configured.'), { status: 503 });
+  if (!firstName && !lastName) throw Object.assign(new Error('A customer name is required for the Contact canary.'), { status: 422 });
+  if (!phone && !email) throw Object.assign(new Error('A valid HCP phone number or email is required for the Contact canary.'), { status: 422 });
+  return {
+    contact: { firstName: firstName || 'Unknown', lastName: lastName || 'Customer', phoneNumber: phone, emailAddress: email },
+    link: {
+      name: `HousecallPro:${externalId}`,
+      sourceSystem: 'HousecallPro',
+      sourceAccountId,
+      externalId,
+      linkStatus: 'Provisional',
+      matchingEvidence: { source: 'hcp-canary', phonePresent: Boolean(phone), emailPresent: Boolean(email) },
+    },
+  };
 }
