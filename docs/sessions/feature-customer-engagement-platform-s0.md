@@ -99,6 +99,24 @@ the validated Sprint 0 patch and new files were applied before rebuilding `hcp-e
 - No EspoCRM credential is configured in the gateway yet, and the HCP reconciliation endpoint
 	remains unavailable until `ENGAGEMENT_RECONCILIATION_ENABLED=true` is explicitly set.
 
+## EspoCRM Read-Only Credential and Inventory
+
+Created and validated on 2026-09-04 after the disabled gateway release:
+
+- Role: `Customer Engagement Platform - Read Only` (`5f28008277306e396`).
+- API user: `engagement-identity-reader` (`dc2bb3d133b86b3d4`), active, API-key auth.
+- Role permissions are read-only (`create=no`, `read=all`, `edit=no`, `delete=no`, `stream=no`)
+	for `Contact`, `HcpCustomerLink`, and `IdentityReview` only.
+- The API key was generated on the EspoCRM database host and transferred through protected,
+	short-lived files directly into the gateway's production `.env`; its value was not displayed
+	or committed.
+- A direct API check confirms the reader can GET each required entity and `/Metadata` while
+	`/App/user` remains forbidden, as intended. The gateway adapter was narrowed accordingly.
+- Authenticated inventory result: 0 Contacts, 1,416 legacy `HcpCustomerLink` stubs, 0
+	`IdentityReview` rows; `Contact`, `HcpCustomerLink`, and `IdentityReview` metadata are present.
+
+The gateway still reports `identityWritesEnabled=false` and `reconciliationEnabled=false`.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
