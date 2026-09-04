@@ -117,6 +117,29 @@ Created and validated on 2026-09-04 after the disabled gateway release:
 
 The gateway still reports `identityWritesEnabled=false` and `reconciliationEnabled=false`.
 
+## HCP Read-Only Reconciliation Run
+
+Owner-approved on 2026-09-04. A fresh, checksum-verified ScopeFoundry database backup was made
+immediately before the run at:
+
+`/home/neilghuman/backups/customer-engagement-platform/reconciliation-prerun-20260904T231533Z`
+
+`ENGAGEMENT_RECONCILIATION_ENABLED` was enabled only for this single authenticated run and was
+returned to `false` immediately afterward. HCP and EspoCRM were accessed with GET requests only.
+
+- Run ID: `15e2fb93-90f1-422a-bd44-c6c4655cdff0`
+- Status: `complete`; 1,416 local ledger events and 1,416 identity audit rows recorded.
+- Results: 1,404 `net_new`; 12 `malformed_or_no_key`; 0 `auto_confirmed`; 0 `provisional`; 0
+	`identity_review`; 0 `field_conflict`.
+- The zero Contact baseline explains the all-net-new outcome. This report is a connectivity,
+	pagination, canonicalization, and audit-path validation, not evidence that live Contact creation
+	is approved.
+- The report response and persisted ledger contain only hashes for external IDs and normalized
+	identity keys; raw HCP contact data was not logged into the gateway tables.
+
+Final gateway state after the run: `identityWritesEnabled=false`,
+`reconciliationEnabled=false`, `espocrmConfigured=true`.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
