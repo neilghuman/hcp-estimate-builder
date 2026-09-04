@@ -201,6 +201,25 @@ record IDs.
 	email value; it is correctly retained as `Provisional` rather than auto-confirmed.
 - No CRM, HCP, Chatwoot, or gateway data was written by this review.
 
+## Read-Only HCP Address Audit
+
+EspoCRM Contacts have one native structured address. The address audit therefore applies a strict
+selection rule: one service address wins; if no service address exists, one billing address may be
+used; multiple service or multiple candidate addresses are ambiguous and cannot be written.
+
+The audit ran on the 11 provisional HCP links with only the temporary reconciliation flag enabled.
+It made no updates and restored the flag to `false` afterward.
+
+- 10 Contacts are `crm_blank` with exactly one unambiguous complete HCP address available.
+	Nine are billing fallbacks and one is a service address.
+- 1 Contact has multiple complete service addresses and is
+	`ambiguous_multiple_service_addresses`; it is excluded from automatic address projection.
+- 0 exact CRM/HCP address matches and 0 address conflicts, because all native CRM address fields
+	remain blank.
+
+The next address-write canary, if approved, must update only those ten blank, unambiguous Contact
+addresses and leave the multi-service-address record untouched for human selection.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
