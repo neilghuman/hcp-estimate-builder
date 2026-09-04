@@ -165,6 +165,29 @@ Both database archives passed checksum verification and `pg_restore --list` vali
 Post-canary totals: 1 Contact, 1 ExternalIdentityLink, 1,416 legacy HcpCustomerLink rows.
 No broad HCP import, legacy-projector change, Contact update, or HCP write was performed.
 
+## Ten-Record HCP Contact Batch Canary
+
+Owner-approved and completed on 2026-09-04 after the single-record canary. The batch endpoint is
+hard-capped at 10 creates, selects only `net_new` HCP customers, processes them sequentially, and
+adds each successful Contact to the in-memory candidate set to prevent same-run duplicates.
+
+Fresh, verified backups immediately before the batch:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/contact-batch-canary-prerun-20260904T232440Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/contact-batch-canary-prerun-20260904T232444Z`
+
+Results: 10 Contacts and 10 `ExternalIdentityLink` records created; no candidates were skipped.
+Together with the first canary, current totals are 11 Contacts, 11 links, 11 distinct linked
+Contacts, and 0 duplicate `(source_system, source_account_id, external_id)` tuples. All 11 links
+are `HousecallPro` / `hcp-production-shared` / `Provisional`. The legacy HcpCustomerLink count
+remains 1,416. All 11 fingerprint-only local canary audit events have a target Contact ID.
+
+The write gate was returned to `false` by cleanup, confirmed by the config endpoint; a post-cleanup
+batch request returned `403`. `ENGAGEMENT_RECONCILIATION_ENABLED` remains `false`.
+
+This is still a canary. Review the ten newly created Contacts before authorizing an expanded batch
+or any broad HCP import.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
