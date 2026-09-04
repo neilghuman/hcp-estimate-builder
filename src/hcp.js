@@ -108,6 +108,28 @@ export async function getCustomer(id) {
   return simplifyCustomer(c);
 }
 
+// Read-only bulk customer shape used by the Customer Engagement Platform's identity dry-run.
+// Keep source values here; the engagement ledger stores only normalized fingerprints.
+export async function listCustomersForReconciliation({ pageSize = 200, maxPages = 50 } = {}) {
+  const customers = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const data = await hcp(`/customers?page=${page}&page_size=${pageSize}`);
+    const batch = Array.isArray(data.customers) ? data.customers : [];
+    customers.push(...batch.map((customer) => ({
+      id: String(customer.id),
+      firstName: customer.first_name || null,
+      lastName: customer.last_name || null,
+      email: customer.email || null,
+      phones: [customer.mobile_number, customer.home_number, customer.work_number].filter(Boolean),
+      tags: Array.isArray(customer.tags) ? customer.tags : [],
+      createdAt: customer.created_at || null,
+      updatedAt: customer.updated_at || null,
+    })));
+    if (batch.length < pageSize) break;
+  }
+  return customers;
+}
+
 function simplifyCustomer(c) {
   return {
     id: c.id,
