@@ -220,6 +220,37 @@ It made no updates and restored the flag to `false` afterward.
 The next address-write canary, if approved, must update only those ten blank, unambiguous Contact
 addresses and leave the multi-service-address record untouched for human selection.
 
+## Bounded HCP Address-Write Canary
+
+Owner-approved and completed on 2026-09-04. A dedicated `engagement-identity-address-writer`
+EspoCRM API user was created with Contact read/edit only; it cannot create or delete Contacts and
+cannot access identity-link entities. The address route is hard-capped at 10 updates and performs
+an EspoCRM read-back after each update before recording a fingerprint-only local audit event.
+
+Fresh verified backups were taken before the initial run and each resume. The final current-state
+restore points are:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/address-canary-seven-prerun-20260904T234437Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/address-canary-seven-prerun-20260904T234442Z`
+
+Result after controlled resumes: 10 Contact addresses now exactly match their selected HCP source
+address; 0 conflicts; 0 blank eligible Contacts. Nine selected addresses are billing fallbacks and
+one is a service address. The remaining Contact with multiple service addresses was never written.
+All 10 successful address updates have a sanitized `address-canary` ledger event linked to their
+Contact; the three early successful writes were backfilled after verification.
+
+Two rollout defects were found and corrected before the final successful resume:
+
+1. EspoCRM returns an empty successful body for Contact address PUT requests. The adapter now
+	accepts that response and requires the subsequent GET read-back to verify the value.
+2. The address route initially omitted the `compareContactAddress` import. Stage-aware error
+	reporting identified the failure; the corrected route verified and completed the remaining
+	updates.
+
+The final read-only audit reports 10 `match`, 1 `ambiguous_multiple_service_addresses`, and no
+other outcome. Final gateway state: `identityWritesEnabled=false` and
+`reconciliationEnabled=false`.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
