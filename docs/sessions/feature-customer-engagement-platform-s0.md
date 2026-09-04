@@ -188,6 +188,19 @@ batch request returned `403`. `ENGAGEMENT_RECONCILIATION_ENABLED` remains `false
 This is still a canary. Review the ten newly created Contacts before authorizing an expanded batch
 or any broad HCP import.
 
+## Independent Canary Review
+
+After the operator reviewed the records in EspoCRM, the gateway performed a second, read-only
+comparison of all 11 provisional links against live HCP and EspoCRM data. The check compared
+normalized names, phone values, and email values but emitted only truncated source hashes and CRM
+record IDs.
+
+- 11 of 11 links passed: name matched and at least one normalized identity key matched.
+- All 11 phone values matched their HCP source.
+- 10 email values matched. The remaining record has a matching name and phone but no matching
+	email value; it is correctly retained as `Provisional` rather than auto-confirmed.
+- No CRM, HCP, Chatwoot, or gateway data was written by this review.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
