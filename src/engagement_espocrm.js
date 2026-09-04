@@ -10,6 +10,7 @@ function config() {
     baseUrl: String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, ''),
     apiKey: String(process.env.ENGAGEMENT_ESPOCRM_API_KEY || ''),
     writerApiKey: String(process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY || ''),
+    addressWriterApiKey: String(process.env.ENGAGEMENT_ESPOCRM_ADDRESS_WRITER_API_KEY || ''),
   };
 }
 
@@ -127,4 +128,33 @@ export async function getContactForAddressAudit(contactId) {
 export async function listProvisionalHcpIdentityLinks() {
   const data = await get('/ExternalIdentityLink?maxSize=200');
   return (data?.list || []).filter((link) => link.sourceSystem === 'HousecallPro' && link.linkStatus === 'Provisional');
+}
+
+export function espocrmAddressWriterConfigured() {
+  const cfg = config();
+  return Boolean(cfg.baseUrl && cfg.addressWriterApiKey);
+}
+
+async function putAddress(contactId, body) {
+  const cfg = config();
+  if (!cfg.baseUrl || !cfg.addressWriterApiKey) throw new EspoCrmError('ENGAGEMENT_ESPOCRM_ADDRESS_WRITER_API_KEY is not configured.', 503);
+  const response = await fetch(`${cfg.baseUrl}/api/v1/Contact/${encodeURIComponent(contactId)}`, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Api-Key': cfg.addressWriterApiKey, 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new EspoCrmError(`EspoCRM address update failed with HTTP ${response.status}.`, response.status === 400 ? 400 : 502);
+  return response.json();
+}
+
+export async function updateCanaryContactAddress(contactId, address) {
+  const body = {
+    addressStreet: address.street,
+    addressCity: address.city,
+    addressState: address.state,
+    addressPostalCode: address.postalCode,
+    addressCountry: address.country,
+  };
+  await putAddress(contactId, body);
+  return getContactForAddressAudit(contactId);
 }

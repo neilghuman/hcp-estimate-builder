@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { namesMateriallyDifferent, normalizeEmail, normalizePhone, resolveIdentity } from '../src/engagement_identity.js';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, compareContactAddress, fingerprint, selectHcpCanaryCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from '../src/engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, compareContactAddress, fingerprint, selectAddressWriteCanary, selectHcpCanaryCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from '../src/engagement_runtime.js';
 
 const contact = {
   id: 'crm-1',
@@ -179,4 +179,18 @@ test('address audit summarizes selected, blank, and ambiguous address states wit
   assert.equal(report.counts.ambiguous_multiple_service_addresses, 1);
   assert.equal(report.examples[0].hcpAddressIdHash, fingerprint('adr-1'));
   assert.equal(JSON.stringify(report).includes('1 Main St'), false);
+});
+
+test('address write canary selects only blank unambiguous Contacts and caps at ten', () => {
+  const service = { id: 'adr-1', type: 'service', street: '1 Main St', city: 'Seattle', state: 'WA', zip: '98101' };
+  const rows = [
+    { contactId: 'crm-blank', linkId: 'link-blank', contact: {}, addresses: [service] },
+    { contactId: 'crm-conflict', linkId: 'link-conflict', contact: { addressStreet: '9 Other St', addressCity: 'Seattle', addressState: 'WA', addressPostalCode: '98101' }, addresses: [service] },
+    { contactId: 'crm-ambiguous', linkId: 'link-ambiguous', contact: {}, addresses: [service, { ...service, id: 'adr-2' }] },
+  ];
+  const batch = selectAddressWriteCanary(rows, { limit: 25 });
+  assert.equal(batch.limit, 10);
+  assert.equal(batch.selected.length, 1);
+  assert.equal(batch.selected[0].contactId, 'crm-blank');
+  assert.deepEqual(batch.skipped, { conflict: 1, ambiguous_multiple_service_addresses: 1 });
 });

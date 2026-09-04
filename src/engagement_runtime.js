@@ -230,3 +230,30 @@ export function summarizeAddressAudit(rows) {
   }
   return { counts, examples };
 }
+
+export function selectAddressWriteCanary(rows, { limit = 10 } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+  const selected = [];
+  const skipped = {};
+  for (const row of rows || []) {
+    if (selected.length >= cappedLimit) break;
+    const selection = selectPrimaryHcpAddress(row.addresses);
+    const comparison = selection.address ? compareContactAddress(row.contact, selection.address) : { status: selection.status };
+    if (comparison.status !== 'crm_blank') {
+      skipped[comparison.status] = (skipped[comparison.status] || 0) + 1;
+      continue;
+    }
+    selected.push({ ...row, address: selection.address });
+  }
+  return { selected, skipped, limit: cappedLimit };
+}
+
+export async function recordAddressProjection(pool, { contactId, linkId, addressId }) {
+  const sourceEventId = `address-canary:${linkId}:${fingerprint(addressId)}`;
+  await pool.query(`
+    INSERT INTO integration_events (
+      source_system, source_event_id, event_type, terminal_status, target_contact_id, correlation_id, processed_at
+    ) VALUES ($1, $2, $3, 'processed', $4, $5, NOW())
+    ON CONFLICT (source_system, source_event_id) DO NOTHING
+  `, ['housecall_pro', sourceEventId, 'identity.address_canary', contactId, crypto.randomUUID()]);
+}

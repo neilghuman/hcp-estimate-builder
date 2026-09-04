@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordDryRunDecision, selectHcpCanaryCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, getContactForAddressAudit, getEspoCrmInventory, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordAddressProjection, recordDryRunDecision, selectAddressWriteCanary, selectHcpCanaryCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, getContactForAddressAudit, getEspoCrmInventory, updateCanaryContactAddress, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
@@ -12,7 +12,7 @@ function credentialsMatch(actual, expected) {
 export function registerEngagementRoutes(app, pool) {
   app.get('/api/integrations/identity/config', (_req, res) => {
     const config = engagementConfig();
-    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
+    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), espocrmAddressWriterConfigured: espocrmAddressWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
   });
 
   const requireIntegrationAuth = (req, res, next) => {
@@ -58,6 +58,29 @@ export function registerEngagementRoutes(app, pool) {
         addresses: await listCustomerAddresses(link.externalId),
       })));
       return res.json({ dryRun: true, sourceSystem: 'housecall_pro', scope: 'provisional_identity_links', ...summarizeAddressAudit(rows) });
+    } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
+  });
+
+  app.post('/api/integrations/identity/canary/hcp-addresses', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    try {
+      const links = await listProvisionalHcpIdentityLinks();
+      const rows = await Promise.all(links.map(async (link) => ({
+        contactId: link.contactId,
+        linkId: link.id,
+        contact: await getContactForAddressAudit(link.contactId),
+        addresses: await listCustomerAddresses(link.externalId),
+      })));
+      const batch = selectAddressWriteCanary(rows, { limit: req.body?.limit });
+      const updated = [];
+      for (const candidate of batch.selected) {
+        const contact = await updateCanaryContactAddress(candidate.contactId, candidate.address);
+        const verification = compareContactAddress(contact, candidate.address);
+        if (verification.status !== 'match') throw new Error(`Contact address read-back did not match for ${candidate.contactId}.`);
+        await recordAddressProjection(pool, { contactId: candidate.contactId, linkId: candidate.linkId, addressId: candidate.address.id });
+        updated.push({ contactId: candidate.contactId, linkId: candidate.linkId, addressType: candidate.address.type, hcpAddressIdHash: fingerprint(candidate.address.id) });
+      }
+      return res.status(201).json({ canary: true, requestedLimit: batch.limit, updated, skipped: batch.skipped });
     } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
   });
 
