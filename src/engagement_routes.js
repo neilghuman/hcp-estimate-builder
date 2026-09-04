@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordDryRunDecision, summarizeReconciliation } from './engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordDryRunDecision, selectHcpCanaryCandidates, summarizeReconciliation } from './engagement_runtime.js';
 import { createCanaryContactAndLink, getEspoCrmInventory, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomersForReconciliation } from './hcp.js';
 
@@ -74,6 +74,26 @@ export function registerEngagementRoutes(app, pool) {
       decision.result.contactId = created.contactId;
       await recordDryRunDecision(pool, decision);
       return res.status(201).json({ canary: true, hcpCustomerIdHash: fingerprint(customer.id), contactId: created.contactId, externalIdentityLinkId: created.linkId, linkStatus: 'Provisional' });
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message, contactId: error.contactId || null });
+    }
+  });
+
+  app.post('/api/integrations/identity/canary/hcp-batch', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    try {
+      const [customers, contacts] = await Promise.all([listCustomersForReconciliation(), listContactsForReconciliation()]);
+      const batch = selectHcpCanaryCandidates(customers, contacts, { limit: req.body?.limit });
+      const created = [];
+      for (const candidate of batch.selected) {
+        const decision = buildDryRunDecision({ sourceSystem: 'housecall_pro', sourceEventId: `canary:${candidate.customer.id}`, record: candidate.customer, contacts });
+        const result = await createCanaryContactAndLink(candidate.projection);
+        decision.sourceEventId = `canary:${fingerprint(candidate.customer.id)}`;
+        decision.result.contactId = result.contactId;
+        await recordDryRunDecision(pool, decision);
+        created.push({ hcpCustomerIdHash: fingerprint(candidate.customer.id), contactId: result.contactId, externalIdentityLinkId: result.linkId });
+      }
+      return res.status(201).json({ canary: true, requestedLimit: batch.limit, created, skipped: batch.skipped });
     } catch (error) {
       return res.status(error.status || 500).json({ error: error.message, contactId: error.contactId || null });
     }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { namesMateriallyDifferent, normalizeEmail, normalizePhone, resolveIdentity } from '../src/engagement_identity.js';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, fingerprint, summarizeReconciliation } from '../src/engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, fingerprint, selectHcpCanaryCandidates, summarizeReconciliation } from '../src/engagement_runtime.js';
 
 const contact = {
   id: 'crm-1',
@@ -128,4 +128,29 @@ test('a successful canary decision can retain its net-new outcome and created Co
   assert.equal(decision.result.outcome, 'net_new');
   decision.result.contactId = 'crm-created';
   assert.equal(decision.result.contactId, 'crm-created');
+});
+
+test('HCP batch canary selects only net-new candidates and caps creates at ten', () => {
+  const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
+  const customers = Array.from({ length: 12 }, (_value, index) => ({ id: `cus_${index}`, firstName: `Person${index}`, phones: [`206-555-${String(1000 + index).slice(-4)}`] }));
+  const batch = selectHcpCanaryCandidates(customers, [], { limit: 50 });
+  assert.equal(batch.limit, 10);
+  assert.equal(batch.selected.length, 10);
+  assert.deepEqual(batch.skipped, {});
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
+});
+
+test('HCP batch canary skips records that match a Contact or lack a usable identity', () => {
+  const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
+  const batch = selectHcpCanaryCandidates([
+    { id: 'existing', firstName: 'Jane', phones: ['206-555-1212'] },
+    { id: 'invalid', firstName: 'No Key', phones: ['extension 3'] },
+    { id: 'new', firstName: 'New', phones: ['425-555-0100'] },
+  ], [contact]);
+  assert.equal(batch.selected.length, 1);
+  assert.equal(batch.selected[0].customer.id, 'new');
+  assert.deepEqual(batch.skipped, { provisional: 1, malformed_or_no_key: 1 });
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
 });

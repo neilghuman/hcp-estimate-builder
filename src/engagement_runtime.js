@@ -143,3 +143,31 @@ export function buildHcpCanaryProjection(customer) {
     },
   };
 }
+
+export function selectHcpCanaryCandidates(customers, contacts, { limit = 10 } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+  const selected = [];
+  const skipped = {};
+  const candidates = Array.isArray(contacts) ? contacts.slice() : [];
+  for (const customer of customers || []) {
+    if (selected.length >= cappedLimit) break;
+    const result = resolveIdentity({ ...customer, sourceSystem: 'housecall_pro' }, {
+      contacts: candidates,
+      defaultCountry: engagementConfig().defaultPhoneCountry,
+    });
+    if (result.outcome !== 'net_new') {
+      skipped[result.outcome] = (skipped[result.outcome] || 0) + 1;
+      continue;
+    }
+    try {
+      const projection = buildHcpCanaryProjection(customer);
+      selected.push({ customer, projection });
+      // Later source records in this batch must see this identity and cannot create a duplicate.
+      candidates.push({ id: `pending:${customer.id}`, firstName: projection.contact.firstName, lastName: projection.contact.lastName, phoneNumber: projection.contact.phoneNumber, emailAddress: projection.contact.emailAddress });
+    } catch (error) {
+      const key = error.status === 422 ? 'malformed_or_no_key' : 'invalid_candidate';
+      skipped[key] = (skipped[key] || 0) + 1;
+    }
+  }
+  return { selected, skipped, limit: cappedLimit };
+}
