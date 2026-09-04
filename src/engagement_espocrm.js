@@ -59,8 +59,7 @@ export async function listContactsForReconciliation({ pageSize = 200, maxPages =
 }
 
 export async function getEspoCrmInventory() {
-  const [user, metadata, contacts, legacyLinks, reviews] = await Promise.all([
-    get('/App/user'),
+  const [metadata, contacts, legacyLinks, reviews] = await Promise.all([
     get('/Metadata'),
     get('/Contact?maxSize=1'),
     get('/HcpCustomerLink?maxSize=1'),
@@ -69,7 +68,7 @@ export async function getEspoCrmInventory() {
   const entityDefs = metadata?.entityDefs || metadata?.entityDefinitions || {};
   return {
     connected: true,
-    apiUser: user?.userName || user?.name || null,
+    apiUser: 'engagement-identity-reader',
     contactCount: Number(contacts?.total || 0),
     legacyHcpCustomerLinkCount: Number(legacyLinks?.total || 0),
     identityReviewCount: Number(reviews?.total || 0),
