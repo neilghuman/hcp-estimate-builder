@@ -140,6 +140,31 @@ returned to `false` immediately afterward. HCP and EspoCRM were accessed with GE
 Final gateway state after the run: `identityWritesEnabled=false`,
 `reconciliationEnabled=false`, `espocrmConfigured=true`.
 
+## Bounded HCP Contact Canary
+
+Owner-approved and completed on 2026-09-04. Fresh pre-canary backups were created and verified:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/contact-canary-prerun-20260904T232020Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/contact-canary-prerun-20260904T232025Z`
+
+Both database archives passed checksum verification and `pg_restore --list` validation.
+
+- Added a separate `engagement-identity-canary-writer` EspoCRM API user with create/read only
+	access to `Contact`, `ExternalIdentityLink`, and `IdentityReview`; it has no edit or delete
+	permission. Its API key is server-side only.
+- The canary route accepts one HCP customer only when the resolver says `net_new`, a fixed HCP
+	source account is configured, and `ENGAGEMENT_IDENTITY_WRITES_ENABLED=true`.
+- One designated HCP test customer created one Contact (`6a9b52995711cc7a5`) and one linked
+	`ExternalIdentityLink` (`6a9b52997ff7622e0`) in `Provisional` status. The link points to the
+	Contact and has the fixed `hcp-production-shared` source account.
+- The local integration event stores only a fingerprinted HCP event key and normalized key hashes;
+	it was corrected to retain the newly created Contact ID after successful creation.
+- The canary route returned `403` both before and after the controlled enablement. Final gateway
+	state: `identityWritesEnabled=false`, `reconciliationEnabled=false`.
+
+Post-canary totals: 1 Contact, 1 ExternalIdentityLink, 1,416 legacy HcpCustomerLink rows.
+No broad HCP import, legacy-projector change, Contact update, or HCP write was performed.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
