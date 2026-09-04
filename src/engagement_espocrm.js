@@ -144,7 +144,9 @@ async function putAddress(contactId, body) {
     body: JSON.stringify(body),
   });
   if (!response.ok) throw new EspoCrmError(`EspoCRM address update failed with HTTP ${response.status}.`, response.status === 400 ? 400 : 502);
-  return response.json();
+  // EspoCRM returns an empty success body for this Contact PUT endpoint.
+  await response.text();
+  return null;
 }
 
 export async function updateCanaryContactAddress(contactId, address) {
