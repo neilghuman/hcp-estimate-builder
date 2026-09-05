@@ -192,6 +192,46 @@ export async function updateCanaryContactAddress(contactId, address) {
   return getContactForAddressAudit(contactId);
 }
 
+export async function listContactsWithBrands({ pageSize = 200, maxPages = 100 } = {}) {
+  const select = 'id,brandRelationships,primaryBrand';
+  const contacts = [];
+  for (let offset = 0; offset < pageSize * maxPages; offset += pageSize) {
+    const data = await get(`/Contact?select=${encodeURIComponent(select)}&maxSize=${pageSize}&offset=${offset}`);
+    const batch = Array.isArray(data?.list) ? data.list : [];
+    contacts.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return contacts;
+}
+
+export async function updateCanaryContactBrands(contactId, { brandRelationships, primaryBrand }) {
+  const body = {};
+  if (Array.isArray(brandRelationships)) body.brandRelationships = brandRelationships;
+  if (primaryBrand) body.primaryBrand = primaryBrand;
+  await putAddress(contactId, body);
+  return getContactForAddressAudit(contactId);
+}
+
+export async function getIdentityQualitySnapshot() {
+  const [reviews, links, contacts] = await Promise.all([
+    get('/IdentityReview?maxSize=200'),
+    get('/ExternalIdentityLink?maxSize=1'),
+    get('/Contact?maxSize=1'),
+  ]);
+  const list = Array.isArray(reviews?.list) ? reviews.list : [];
+  const byStatus = {};
+  let resolvedAsDuplicate = 0;
+  for (const review of list) {
+    byStatus[review.reviewStatus] = (byStatus[review.reviewStatus] || 0) + 1;
+    if (review.decision === 'LinkExisting') resolvedAsDuplicate += 1;
+  }
+  return {
+    contactCount: Number(contacts?.total || 0),
+    externalIdentityLinkCount: Number(links?.total || 0),
+    reviews: { total: Number(reviews?.total || 0), byStatus, resolvedAsDuplicate },
+  };
+}
+
 export async function findOpenIdentityReview({ sourceSystem, sourceAccountId, externalId }) {
   const data = await get('/IdentityReview?maxSize=200');
   return (data?.list || []).find((review) => review.sourceSystem === sourceSystem

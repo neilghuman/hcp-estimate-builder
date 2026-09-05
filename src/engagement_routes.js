@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressBackfillCandidates, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, listContactsWithAddresses, listDecidedIdentityReviews, updateCanaryContactAddress, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, deriveBrandRelationships, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressBackfillCandidates, selectAddressWriteCanary, selectBrandBackfillCandidates, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, getIdentityQualitySnapshot, listContactsWithAddresses, listContactsWithBrands, listDecidedIdentityReviews, updateCanaryContactAddress, updateCanaryContactBrands, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
@@ -24,6 +24,22 @@ export function registerEngagementRoutes(app, pool) {
   app.get('/api/integrations/espocrm/inventory', requireIntegrationAuth, async (_req, res) => {
     try { return res.json(await getEspoCrmInventory()); }
     catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
+  });
+
+  app.get('/api/integrations/identity/quality-report', requireIntegrationAuth, async (_req, res) => {
+    try {
+      const [snapshot, recon, bySource] = await Promise.all([
+        getIdentityQualitySnapshot(),
+        pool.query("SELECT id, counts, completed_at FROM identity_reconciliation_runs WHERE status = 'complete' ORDER BY completed_at DESC NULLS LAST LIMIT 1"),
+        pool.query('SELECT source_system, COUNT(DISTINCT target_contact_id)::int AS contacts FROM integration_events WHERE target_contact_id IS NOT NULL GROUP BY source_system ORDER BY 2 DESC'),
+      ]);
+      return res.json({
+        generatedAt: new Date().toISOString(),
+        espocrm: snapshot,
+        latestReconciliation: recon.rows[0] || null,
+        contactsCreatedBySource: bySource.rows,
+      });
+    } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
   });
 
   app.post('/api/integrations/identity/reconcile/hcp', requireIntegrationAuth, async (_req, res) => {
@@ -278,6 +294,31 @@ export function registerEngagementRoutes(app, pool) {
       return res.status(201).json({ canary: true, requestedLimit: batch.limit, updated, skipped });
     } catch (error) {
       console.error('[ENGAGEMENT_ADDRESS_BULK_FAILED]', { stage, message: error.message });
+      return res.status(error.status || 500).json({ error: error.message, stage });
+    }
+  });
+
+  app.post('/api/integrations/identity/canary/hcp-brands-bulk', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    let stage = 'load_candidates';
+    try {
+      const [links, customers, contacts] = await Promise.all([listProvisionalHcpIdentityLinks(), listCustomersForReconciliation(), listContactsWithBrands()]);
+      const customersByExternalId = new Map(customers.map((customer) => [String(customer.id), customer]));
+      const contactsById = new Map(contacts.map((contact) => [String(contact.id), contact]));
+      const batch = selectBrandBackfillCandidates(links, customersByExternalId, contactsById, { limit: req.body?.limit, maxLimit: 400 });
+      const updated = [];
+      for (const candidate of batch.selected) {
+        stage = `update:${candidate.contactId}`;
+        const contact = await updateCanaryContactBrands(candidate.contactId, { brandRelationships: candidate.brandRelationships, primaryBrand: candidate.primaryBrand });
+        stage = `verify:${candidate.contactId}`;
+        const applied = Array.isArray(contact?.brandRelationships) ? contact.brandRelationships : [];
+        const missing = candidate.brandRelationships.filter((brand) => !applied.includes(brand));
+        if (missing.length) throw new Error(`Brand read-back missing ${missing.join(',')} for ${candidate.contactId}.`);
+        updated.push({ contactId: candidate.contactId, linkId: candidate.linkId, brandRelationships: candidate.brandRelationships, primaryBrand: candidate.primaryBrand });
+      }
+      return res.status(201).json({ canary: true, requestedLimit: batch.limit, updated, skipped: batch.skipped });
+    } catch (error) {
+      console.error('[ENGAGEMENT_BRAND_BULK_FAILED]', { stage, message: error.message });
       return res.status(error.status || 500).json({ error: error.message, stage });
     }
   });
