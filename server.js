@@ -146,6 +146,19 @@ function calendarSyncEnabled() {
   return String(process.env.ENGAGEMENT_CALLBACK_CALENDAR_ENABLED || 'false').toLowerCase() === 'true';
 }
 
+// Maps a dashboard agent (name or id) to their 3CX extension for click-to-call
+// origination. JSON: { "<agent name or id>": "<extension>" }.
+function agentToExtension(agent) {
+  let map = {};
+  try { map = JSON.parse(process.env.ENGAGEMENT_CALLBACK_AGENT_EXTENSION_MAP || '{}'); }
+  catch (error) { console.warn('[CALLBACK_AGENT_EXTENSION_MAP_INVALID]', error.message); return null; }
+  if (!map || typeof map !== 'object') return null;
+  const name = String(agent?.name || '').trim();
+  const id = String(agent?.id || '').trim();
+  const hit = (name && map[name]) || (id && map[id]) || null;
+  return hit ? String(hit) : null;
+}
+
 // Explicit override map for owners whose Chatwoot email does not match their
 // EspoCRM user email. JSON: { "<owner name>": "<userId>" }.
 function ownerUserMapOverride(owner) {
@@ -580,6 +593,7 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
 });
 
 // Click-to-call: initiate a 3CX call to the conversation's customer. Gated.
+// Originates from the agent's own 3CX extension when mapped, else the route point.
 app.post('/api/engagement/callback-panel/:conversationId/call', async (req, res) => {
   const conversationId = String(req.params.conversationId || '').trim();
   if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
@@ -588,8 +602,9 @@ app.post('/api/engagement/callback-panel/:conversationId/call', async (req, res)
     const panel = await loadCallbackPanelContext(conversationId);
     const phone = panel.context.contact.phone;
     if (!phone) return res.status(422).json({ error: 'The customer has no phone number to call.' });
-    const result = await makeCall(phone);
-    res.json({ ok: true, destination: phone, result });
+    const dn = agentToExtension(req.body?.agent) || undefined;
+    const result = await makeCall(phone, { dn });
+    res.json({ ok: true, destination: phone, from: dn || 'route-point', result });
   } catch (error) {
     res.status(error.status || 502).json({ error: error.message });
   }

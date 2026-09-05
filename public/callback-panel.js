@@ -58,7 +58,7 @@ async function load() {
       callBtn.disabled = true;
       show(`Calling ${data.customer.phone} via 3CX...`);
       try {
-        await request(apiPath(`/api/engagement/callback-panel/${conversationId}/call`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        await request(apiPath(`/api/engagement/callback-panel/${conversationId}/call`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent: currentAgent }) });
         show(`Call started to ${data.customer.phone}.`, 'success');
       } catch (error) { show(error.message, 'error'); }
       finally { callBtn.disabled = false; }

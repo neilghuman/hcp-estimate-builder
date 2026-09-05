@@ -46,6 +46,28 @@ test('makeCall gets a token then posts destination to the DN makecall endpoint',
   }
 });
 
+test('makeCall originates from a provided DN (agent extension) when given', async () => {
+  setEnv();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    let body = null;
+    try { body = init.body && typeof init.body === 'string' ? JSON.parse(init.body) : null; } catch { body = null; }
+    calls.push({ url: String(url), body });
+    if (String(url).endsWith('/connect/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) };
+    return { ok: true, text: async () => JSON.stringify({ finalstatus: 'Connected' }) };
+  };
+  try {
+    await makeCall('+12065551212', { dn: '100' });
+    const call = calls.find((c) => c.url.includes('/makecall'));
+    assert.match(call.url, /\/callcontrol\/100\/makecall$/);
+    assert.equal(call.body.destination, '+12065551212');
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearEnv();
+  }
+});
+
 test('makeCall throws on a Failed finalstatus', async () => {
   setEnv();
   const originalFetch = globalThis.fetch;

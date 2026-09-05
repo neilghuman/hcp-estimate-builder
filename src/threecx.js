@@ -35,14 +35,16 @@ async function getToken() {
   return _token.value;
 }
 
-// Initiate a call from the configured DN to `destination`. Resolves with the 3CX
-// result object; throws on transport failure or a Failed finalstatus.
-export async function makeCall(destination) {
+// Initiate a call from a DN (default: the configured route point) to `destination`.
+// Resolves with the 3CX result object; throws on transport failure or Failed status.
+export async function makeCall(destination, { dn } = {}) {
   const c = cfg();
+  const fromDn = String(dn || c.dn || '').trim();
   const dest = String(destination || '').trim();
+  if (!fromDn) throw new Error('A 3CX DN to originate the call is required.');
   if (!dest) throw new Error('A destination number is required.');
   const token = await getToken();
-  const r = await fetch(`${c.base}/callcontrol/${encodeURIComponent(c.dn)}/makecall`, {
+  const r = await fetch(`${c.base}/callcontrol/${encodeURIComponent(fromDn)}/makecall`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ destination: dest }),
