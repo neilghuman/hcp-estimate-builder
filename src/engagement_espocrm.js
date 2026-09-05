@@ -190,3 +190,43 @@ export async function listOpenIdentityReviews() {
   const data = await get('/IdentityReview?maxSize=200');
   return (data?.list || []).filter((review) => review.reviewStatus === 'Open');
 }
+
+export async function listDecidedIdentityReviews() {
+  const data = await get('/IdentityReview?maxSize=200');
+  return (data?.list || []).filter((review) => ['Open', 'InReview'].includes(review.reviewStatus) && Boolean(review.decision));
+}
+
+export async function createExternalIdentityLink(link) {
+  const created = await post('/ExternalIdentityLink', link);
+  if (!created?.id) throw new EspoCrmError('EspoCRM ExternalIdentityLink create response did not include an ID.', 502);
+  return created;
+}
+
+async function put(pathname, body) {
+  const cfg = config();
+  if (!cfg.baseUrl || !cfg.writerApiKey) throw new EspoCrmError('ENGAGEMENT_ESPOCRM_WRITER_API_KEY is not configured.', 503);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  try {
+    const response = await fetch(`${cfg.baseUrl}/api/v1${pathname}`, {
+      method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Api-Key': cfg.writerApiKey, 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+    if (!response.ok) throw new EspoCrmError(`EspoCRM PUT ${pathname} failed with HTTP ${response.status}.`, response.status === 400 || response.status === 409 ? response.status : 502);
+    return data;
+  } catch (error) {
+    if (error instanceof EspoCrmError) throw error;
+    throw new EspoCrmError(error.name === 'AbortError' ? 'EspoCRM request timed out.' : `EspoCRM is unreachable: ${error.message}`, 504);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function updateIdentityReview(id, patch) {
+  return put(`/IdentityReview/${encodeURIComponent(id)}`, patch);
+}

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, createIdentityReview, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, updateCanaryContactAddress, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, listDecidedIdentityReviews, updateCanaryContactAddress, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
@@ -68,6 +68,41 @@ export function registerEngagementRoutes(app, pool) {
         created.push({ identityReviewId: inserted.id, hcpCustomerIdHash: fingerprint(candidate.customer.id), outcome: candidate.result.outcome });
       }
       return res.status(201).json({ canary: true, requestedLimit: batch.limit, created, existing, skipped: batch.skipped });
+    } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
+  });
+
+  app.post('/api/integrations/identity/reviews/execute', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    const requestedReviewId = req.body?.reviewId ? String(req.body.reviewId) : null;
+    const limit = Math.min(Math.max(Number(req.body?.limit) || 10, 1), 50);
+    try {
+      const decided = await listDecidedIdentityReviews();
+      const targets = (requestedReviewId ? decided.filter((review) => review.id === requestedReviewId) : decided).slice(0, limit);
+      const executed = [];
+      const failed = [];
+      for (const review of targets) {
+        try {
+          const needsCustomer = ['CreateNew', 'Separate'].includes(review.decision);
+          const hcpCustomer = needsCustomer ? await getCustomerForReconciliation(review.externalId) : null;
+          const plan = buildReviewExecutionPlan(review, hcpCustomer);
+          let contactId = plan.contactId || null;
+          let externalIdentityLinkId = null;
+          if (plan.action === 'link') {
+            const link = await createExternalIdentityLink(plan.link);
+            externalIdentityLinkId = link.id;
+          } else if (plan.action === 'create') {
+            const created = await createCanaryContactAndLink({ contact: plan.contact, link: plan.link });
+            contactId = created.contactId;
+            externalIdentityLinkId = created.linkId;
+          }
+          await updateIdentityReview(review.id, { ...plan.reviewUpdate, decidedAt: new Date().toISOString() });
+          await recordReviewExecution(pool, { reviewId: review.id, contactId, decision: review.decision });
+          executed.push({ reviewId: review.id, action: plan.action, decision: review.decision, hcpCustomerIdHash: fingerprint(review.externalId), contactId, externalIdentityLinkId });
+        } catch (error) {
+          failed.push({ reviewId: review.id, decision: review.decision, error: error.message, status: error.status || 500 });
+        }
+      }
+      return res.status(failed.length && !executed.length ? 502 : 201).json({ executed, failed, count: executed.length });
     } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
   });
 

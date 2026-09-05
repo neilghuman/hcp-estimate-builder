@@ -334,6 +334,58 @@ export function selectHcpImportCandidates(customers, contacts, { limit = 25, exi
   return { selected, skipped, limit: cappedLimit };
 }
 
+export function buildReviewExecutionPlan(review, hcpCustomer) {
+  const decision = String(review?.decision || '').trim();
+  const status = String(review?.reviewStatus || '').trim();
+  if (!decision) throw Object.assign(new Error('Review has no decision to execute.'), { status: 422 });
+  if (!['Open', 'InReview'].includes(status)) throw Object.assign(new Error(`Review is not actionable (status ${status || 'unknown'}).`), { status: 409 });
+  const sourceAccountId = String(review.sourceAccountId || process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID || '').trim();
+  const externalId = String(review.externalId || '').trim();
+  if (!sourceAccountId) throw Object.assign(new Error('sourceAccountId is missing for the review.'), { status: 503 });
+  if (!externalId) throw Object.assign(new Error('externalId is missing for the review.'), { status: 422 });
+  const evidence = { source: 'identity_review', reviewId: review.id || null, decision };
+  const baseLink = { name: `HousecallPro:${externalId}`, sourceSystem: 'HousecallPro', sourceAccountId, externalId, linkStatus: 'Confirmed' };
+
+  if (decision === 'Defer') {
+    return { action: 'defer', reviewUpdate: { reviewStatus: 'Deferred' } };
+  }
+  if (decision === 'LinkExisting') {
+    const contactId = String(review.candidateContactId || '').trim();
+    if (!contactId) throw Object.assign(new Error('LinkExisting requires a candidateContactId on the review.'), { status: 422 });
+    return {
+      action: 'link',
+      contactId,
+      link: { ...baseLink, contactId, matchingEvidence: evidence },
+      reviewUpdate: { reviewStatus: 'Linked' },
+    };
+  }
+  if (decision === 'CreateNew' || decision === 'Separate') {
+    const projection = buildHcpCanaryProjection(hcpCustomer);
+    projection.link.linkStatus = 'Confirmed';
+    projection.link.matchingEvidence = {
+      ...projection.link.matchingEvidence,
+      ...evidence,
+      ...(decision === 'Separate' ? { separatedFrom: review.candidateContactId || null } : {}),
+    };
+    return {
+      action: 'create',
+      contact: projection.contact,
+      link: projection.link,
+      reviewUpdate: { reviewStatus: decision === 'Separate' ? 'Separate' : 'Created' },
+    };
+  }
+  throw Object.assign(new Error(`Unknown review decision: ${decision}.`), { status: 422 });
+}
+
+export async function recordReviewExecution(pool, { reviewId, contactId, decision }) {
+  await pool.query(`
+    INSERT INTO integration_events (
+      source_system, source_event_id, event_type, terminal_status, target_contact_id, correlation_id, processed_at
+    ) VALUES ($1, $2, $3, 'processed', $4, $5, NOW())
+    ON CONFLICT (source_system, source_event_id) DO NOTHING
+  `, ['housecall_pro', `review:${reviewId}`, `identity.review.${String(decision || 'unknown').toLowerCase()}`, contactId || null, crypto.randomUUID()]);
+}
+
 export async function createHcpImportRun(pool, batchSize) {
   const id = crypto.randomUUID();
   await pool.query('INSERT INTO hcp_contact_import_runs (id, status, batch_size) VALUES ($1, $2, $3)', [id, 'running', batchSize]);
