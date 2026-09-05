@@ -1,6 +1,9 @@
 let conversationId = new URLSearchParams(location.search).get('conversationId');
 let currentAgent = null;
-const form = document.querySelector('#form');
+let panelData = null;
+let activeTab = 'callback';
+const callbackForm = document.querySelector('#callbackForm');
+const taskForm = document.querySelector('#taskForm');
 const message = document.querySelector('#message');
 function newIdempotencyKey() {
   return globalThis.crypto?.randomUUID?.() || `panel-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -22,6 +25,17 @@ function apiPath(path) {
   return location.pathname.startsWith('/callback-panel/') ? `/callback-panel${path}` : path;
 }
 
+function customerFields() {
+  return { firstName: document.querySelector('#firstName').value, lastName: document.querySelector('#lastName').value };
+}
+
+function setTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach((button) => button.classList.toggle('is-active', button.dataset.tab === tab));
+  callbackForm.hidden = tab !== 'callback' || !panelData?.callbackWritesEnabled;
+  taskForm.hidden = tab !== 'task' || !panelData?.customerTasksEnabled;
+}
+
 function dashboardContext(event) {
   try {
     const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
@@ -41,16 +55,22 @@ async function load() {
   if (!currentAgent?.id || !(currentAgent.name || currentAgent.email)) { show('Loading Chatwoot agent context...', ''); return; }
   const params = new URLSearchParams({ agentId: currentAgent.id, agentName: currentAgent.name || currentAgent.email });
   const data = await request(apiPath(`/api/engagement/callback-panel/${conversationId}?${params}`));
+  panelData = data;
   document.querySelector('#customer').textContent = [data.customer.name, data.customer.phone, data.customer.email].filter(Boolean).join(' | ') || 'Unnamed customer';
   if (data.crmUrl) { const link = document.querySelector('#crmLink'); link.href = data.crmUrl; link.hidden = false; }
   if (data.identity.outcome === 'net_new') {
     document.querySelector('#customerNameField').hidden = false;
     document.querySelector('#firstName').required = true;
     document.querySelector('#lastName').required = true;
-  } else if (data.identity.outcome !== 'auto_confirmed') { const notice = document.querySelector('#identity'); notice.textContent = 'Customer identity needs review before a callback can be scheduled.'; notice.hidden = false; return; }
-  if (!data.callbackWritesEnabled) { const notice = document.querySelector('#identity'); notice.textContent = 'Callback scheduling is temporarily unavailable.'; notice.hidden = false; return; }
-  form.hidden = false;
+  } else if (data.identity.outcome !== 'auto_confirmed') { const notice = document.querySelector('#identity'); notice.textContent = 'Customer identity needs review before a follow-up can be created.'; notice.hidden = false; return; }
+  if (!data.callbackWritesEnabled && !data.customerTasksEnabled) { const notice = document.querySelector('#identity'); notice.textContent = 'Customer follow-up tools are temporarily unavailable.'; notice.hidden = false; return; }
+  document.querySelector('#tabs').hidden = false;
+  document.querySelector('[data-tab="callback"]').hidden = !data.callbackWritesEnabled;
+  document.querySelector('[data-tab="task"]').hidden = !data.customerTasksEnabled;
+  activeTab = data.callbackWritesEnabled ? 'callback' : 'task';
+  setTab(activeTab);
   const owner = document.querySelector('#owner'); owner.textContent = `Owner: ${data.owner}`; owner.hidden = false;
+  const taskOwner = document.querySelector('#taskOwner'); taskOwner.textContent = `Owner: ${data.owner}`; taskOwner.hidden = false;
   if (data.clickToCallEnabled && data.customer.phone) {
     const callBtn = document.querySelector('#callBtn');
     callBtn.hidden = false;
@@ -67,6 +87,7 @@ async function load() {
   if (data.callbacks.length) {
     document.querySelector('#openCallbacks').hidden = false;
     const list = document.querySelector('#callbackList');
+    list.innerHTML = '';
     for (const callback of data.callbacks) {
       const item = document.createElement('li');
       item.textContent = `${callback.callbackNumber}: ${fmt(callback.dueAt)} - ${callback.reason}`;
@@ -75,16 +96,36 @@ async function load() {
   }
 }
 
-form.addEventListener('submit', async (event) => {
+document.querySelector('#tabs').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-tab]');
+  if (!button) return;
+  setTab(button.dataset.tab);
+});
+
+callbackForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = document.querySelector('#submit');
   button.disabled = true;
   show('Scheduling...');
   try {
-    const callback = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/callbacks`), { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey }, body: JSON.stringify({ firstName: document.querySelector('#firstName').value, lastName: document.querySelector('#lastName').value, dueAt: document.querySelector('#dueAt').value, reason: document.querySelector('#reason').value, agent: currentAgent }) });
+    const callback = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/callbacks`), { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey }, body: JSON.stringify({ ...customerFields(), dueAt: document.querySelector('#dueAt').value, reason: document.querySelector('#reason').value, agent: currentAgent }) });
     show(`${callback.replayed ? 'Existing' : 'Scheduled'} callback ${callback.callback.callbackNumber}.`, 'success');
     if (callback.crmUrl) { const link = document.querySelector('#crmLink'); link.href = callback.crmUrl; link.textContent = 'Open CRM Callback'; link.hidden = false; }
-    form.reset(); idempotencyKey = newIdempotencyKey();
+    callbackForm.reset(); idempotencyKey = newIdempotencyKey();
+  } catch (error) { show(error.message, 'error'); }
+  finally { button.disabled = false; }
+});
+
+taskForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = document.querySelector('#taskSubmit');
+  button.disabled = true;
+  show('Creating task...');
+  try {
+    const result = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/tasks`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...customerFields(), title: document.querySelector('#taskTitle').value, dueAt: document.querySelector('#taskDueAt').value, details: document.querySelector('#taskDetails').value, agent: currentAgent }) });
+    show('Task created in CRM.', 'success');
+    if (result.crmUrl) { const link = document.querySelector('#crmLink'); link.href = result.crmUrl; link.textContent = 'Open CRM Task'; link.hidden = false; }
+    taskForm.reset();
   } catch (error) { show(error.message, 'error'); }
   finally { button.disabled = false; }
 });
