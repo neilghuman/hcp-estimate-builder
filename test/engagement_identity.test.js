@@ -151,6 +151,16 @@ test('expanded HCP batch selector permits at most twenty-five creates', () => {
   process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
 });
 
+test('larger HCP batch selector permits at most one hundred creates', () => {
+  const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
+  const customers = Array.from({ length: 120 }, (_value, index) => ({ id: `cus-large-${index}`, firstName: `Person${index}`, phones: [`206-555-${String(3000 + index).slice(-4)}`] }));
+  const batch = selectHcpCanaryCandidates(customers, [], { limit: 200, maxLimit: 100 });
+  assert.equal(batch.limit, 100);
+  assert.equal(batch.selected.length, 100);
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
+});
+
 test('HCP batch canary skips records that match a Contact or lack a usable identity', () => {
   const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
   process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
