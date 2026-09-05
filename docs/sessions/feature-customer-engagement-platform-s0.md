@@ -385,6 +385,25 @@ Before resuming this run, execute the corrected IdentityReview queue route again
 existing open review source IDs before applying its cap, allowing unqueued conflicts/collisions/
 provisional cases to advance instead of repeatedly selecting the first ten reviews.
 
+## IdentityReview Queue Advancement
+
+The corrected review selector was run on 2026-09-05 after fresh verified backups:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/identity-review-advance-prerun-20260905T014107Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/identity-review-advance-prerun-20260905T014112Z`
+
+The run excluded the 10 existing open reviews before applying its cap and created 10 new reviews:
+8 provisional and 2 field-conflict. It skipped 157 auto-confirmed, 1,159 net-new, and 12
+malformed/no-key sources; malformed records did not enter the human decision queue.
+
+Current open queue: 20 distinct source identities, with 12 provisional, 7 field-conflict, and 1
+preserved pre-fix review lacking evidence. The 19 post-fix reviews contain immutable evidence and
+there are 0 duplicate open source identities. Both feature gates were restored to `false`.
+
+Review these 20 Open records in EspoCRM before resuming import run
+`f3b5ec77-b45a-41d5-8153-b9e03eaca21a`; the runner will continue to skip reviewable sources until
+they receive an explicit human decision.
+
 ## IdentityReview Queue Canary
 
 Owner-approved and completed on 2026-09-05. A fresh reconciliation found 2 `identity_review`, 6
