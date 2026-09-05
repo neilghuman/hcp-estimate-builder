@@ -31,6 +31,7 @@ export function scheduleCallback({
   reason = null,
   timezone = null,
   source = null,
+  idempotencyKey = null,
   status = 'scheduled',
 } = {}) {
   const hasContact = typeof contactId === 'string' && contactId.trim().length > 0;
@@ -38,6 +39,7 @@ export function scheduleCallback({
   const normalizedOwner = String(owner ?? '').trim();
   const normalizedReason = String(reason ?? '').trim();
   const normalizedTimezone = normalizeTimeZone(timezone);
+  const normalizedIdempotencyKey = idempotencyKey == null ? null : String(idempotencyKey).trim();
 
   if (!hasContact) {
     throw new Error('A valid contactId is required to schedule a callback.');
@@ -67,6 +69,7 @@ export function scheduleCallback({
     owner: normalizedOwner,
     reason: normalizedReason,
     source: source ?? null,
+    idempotencyKey: normalizedIdempotencyKey || null,
     status,
     createdAt: new Date().toISOString(),
   };
@@ -164,12 +167,20 @@ export function sendReminderForCallback(callback) {
 
 export function createCallbackStore() {
   const callbacks = new Map();
+  const byIdempotencyKey = new Map();
 
   return {
     create(input) {
       const callback = scheduleCallback(input);
       callbacks.set(callback.id, callback);
       return callback;
+    },
+    createOnce(input) {
+      const key = String(input?.idempotencyKey || '').trim();
+      if (key && byIdempotencyKey.has(key)) return { callback: callbacks.get(byIdempotencyKey.get(key)), replayed: true };
+      const callback = this.create(input);
+      if (key) byIdempotencyKey.set(key, callback.id);
+      return { callback, replayed: false };
     },
     get(id) {
       return callbacks.get(id) || null;
@@ -261,7 +272,7 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
       await migrate();
       const callback = scheduleCallback(input);
       await pool.query(
-        `INSERT INTO ${table} (id, callback_number, contact_id, phone, due_at, timezone, owner, reason, source, status, outcome, reminder_sent_at, rescheduled_to_callback_id, rescheduled_from_callback_id, completed_at, completed_by, created_at, updated_at, payload) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+        `INSERT INTO ${table} (id, callback_number, contact_id, phone, due_at, timezone, owner, reason, source, status, outcome, reminder_sent_at, rescheduled_to_callback_id, rescheduled_from_callback_id, completed_at, completed_by, created_at, updated_at, payload, idempotency_key) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
         [
           callback.id,
           callback.callbackNumber,
@@ -282,9 +293,25 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
           callback.createdAt,
           callback.updatedAt ?? callback.createdAt,
           JSON.stringify({ ...callback }),
+          callback.idempotencyKey,
         ]
       );
       return callback;
+    },
+    async createOnce(input) {
+      const key = String(input?.idempotencyKey || '').trim();
+      if (key) {
+        const found = await pool.query(`SELECT id FROM ${table} WHERE idempotency_key = $1`, [key]);
+        if (found.rows[0]?.id) return { callback: await this.get(found.rows[0].id), replayed: true };
+      }
+      try {
+        return { callback: await this.create(input), replayed: false };
+      } catch (error) {
+        if (!key || error?.code !== '23505') throw error;
+        const found = await pool.query(`SELECT id FROM ${table} WHERE idempotency_key = $1`, [key]);
+        if (!found.rows[0]?.id) throw error;
+        return { callback: await this.get(found.rows[0].id), replayed: true };
+      }
     },
     async get(id) {
       await migrate();
@@ -309,6 +336,7 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
         completedAt: row.completed_at || null,
         completedBy: row.completed_by || null,
         crmId: row.crm_id || null,
+        idempotencyKey: row.idempotency_key || null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
@@ -334,6 +362,7 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
         completedAt: row.completed_at || null,
         completedBy: row.completed_by || null,
         crmId: row.crm_id || null,
+        idempotencyKey: row.idempotency_key || null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }));
@@ -360,6 +389,7 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
         completedAt: row.completed_at || null,
         completedBy: row.completed_by || null,
         crmId: row.crm_id || null,
+        idempotencyKey: row.idempotency_key || null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }));

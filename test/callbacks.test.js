@@ -148,6 +148,7 @@ test('persisted callback store round-trips records through a db-backed adapter',
           created_at: params[16],
           updated_at: params[17],
           payload: JSON.parse(params[18] || '{}'),
+          idempotency_key: params[19] || null,
         });
         return { rows: [{ id }] };
       }
@@ -199,6 +200,17 @@ test('persisted callback store round-trips records through a db-backed adapter',
   assert.equal(updated.outcome, 'resolved');
   assert.equal(updated.completedBy, 'agent-42');
   assert.ok(updated.completedAt);
+});
+
+test('callback store replays a matching idempotency key without creating another callback', () => {
+  const store = createCallbackStore();
+  const input = { contactId: 'c-1', phone: '206-555-1212', dueAt: '2026-09-05T12:00:00Z', owner: 'agent-42', reason: 'Follow-up', timezone: 'America/Los_Angeles', idempotencyKey: 'panel-request-1' };
+  const first = store.createOnce(input);
+  const second = store.createOnce(input);
+  assert.equal(first.replayed, false);
+  assert.equal(second.replayed, true);
+  assert.equal(second.callback.id, first.callback.id);
+  assert.equal(store.list().length, 1);
 });
 
 test('persisted callback store reschedules as linked records', async () => {
