@@ -334,6 +334,28 @@ A full read-only audit across all 136 provisional HCP links reports 36 exact mat
 92 blank Contacts with a safe candidate for later backfill, 8 records with no complete address,
 and 0 multiple-billing or multiple-service ambiguities under the billing-first policy.
 
+## Expanded 100-Record HCP Address Backfill
+
+Owner-approved and completed on 2026-09-05. The endpoint is independently hard-capped at 100 and
+uses the same billing-first selection, no-overwrite rule, per-record EspoCRM GET read-back, and
+sanitized address ledger event as the smaller canaries.
+
+Fresh verified backups preceded the run:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/hcp-address-backfill-100-prerun-20260905T012010Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/hcp-address-backfill-100-prerun-20260905T012015Z`
+
+The batch updated all 92 remaining safe address candidates: 66 billing addresses and 26
+sole-service fallbacks. It skipped 36 existing exact matches and 8 HCP records without a complete
+address. Every update passed the route's mandatory EspoCRM read-back; the local ledger now has 128
+Contact-linked `address-canary` events, matching the 128 Contacts with an address. Taylynn Twiggs
+was explicitly verified to have an address after the run.
+
+An attempt to start a final aggregate read-only audit hit the known container-startup readiness race
+before sending any audit request. The audit flag was immediately restored to `false`; no data
+changed. Final gateway state is `identityWritesEnabled=false` and
+`reconciliationEnabled=false`.
+
 ## IdentityReview Queue Canary
 
 Owner-approved and completed on 2026-09-05. A fresh reconciliation found 2 `identity_review`, 6
