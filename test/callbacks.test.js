@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildCallbackCommandCenter, buildCallbackQueue, createCallbackStore, createPersistedCallbackStore, findDueCallbacks, rescheduleCallback, scheduleCallback, sendReminderForCallback, updateCallbackStatus } from '../src/callbacks.js';
-import { createCallbackRecord, createMeetingRecord, listCallbackRecords, updateCallbackRecord } from '../src/engagement_espocrm.js';
+import { createCallbackRecord, createMeetingRecord, deleteMeetingRecord, listCallbackRecords, updateCallbackRecord, updateMeetingRecord } from '../src/engagement_espocrm.js';
 
 test('scheduleCallback requires a valid contact or phone and a due time', () => {
   assert.throws(() => scheduleCallback({ reason: 'Follow-up', dueAt: null }), /contactId/i);
@@ -278,6 +278,31 @@ test('command center separates upcoming, due-soon, overdue, and exception work',
   assert.deepEqual(dashboard.upcoming.map((callback) => callback.id), ['soon', 'later']);
   assert.deepEqual(dashboard.overdue.map((callback) => callback.id), ['late']);
   assert.deepEqual(dashboard.exceptions.map((callback) => callback.id), ['late']);
+});
+
+test('EspoCRM meeting lifecycle adapter formats update datetimes and deletes by id', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+    return { ok: true, text: async () => JSON.stringify({ id: 'meet-1' }) };
+  };
+  try {
+    process.env.ENGAGEMENT_ESPOCRM_BASE_URL = 'https://crm.test';
+    process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY = 'writer-key';
+    await updateMeetingRecord('meet-1', { status: 'Held', dateStart: '2026-09-07T09:00:00Z', dateEnd: '2026-09-07T09:30:00Z' });
+    const put = calls.find((call) => call.method === 'PUT');
+    assert.match(String(put.url), /\/Meeting\/meet-1$/);
+    assert.equal(put.body.status, 'Held');
+    assert.equal(put.body.dateStart, '2026-09-07 09:00:00');
+    assert.equal(put.body.dateEnd, '2026-09-07 09:30:00');
+    assert.doesNotMatch(String(put.body.dateStart), /[TZ]/);
+    await deleteMeetingRecord('meet-1');
+    const del = calls.find((call) => call.method === 'DELETE');
+    assert.match(String(del.url), /\/Meeting\/meet-1$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('EspoCRM meeting adapter formats datetimes and assigns the owner for calendar sync', async () => {
