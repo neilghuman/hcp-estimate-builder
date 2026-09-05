@@ -258,12 +258,16 @@ export async function recordAddressProjection(pool, { contactId, linkId, address
   `, ['housecall_pro', sourceEventId, 'identity.address_canary', contactId, crypto.randomUUID()]);
 }
 
-export function selectIdentityReviewCandidates(customers, contacts, { limit = 10 } = {}) {
+export function selectIdentityReviewCandidates(customers, contacts, { limit = 10, existingSourceIds = new Set() } = {}) {
   const cappedLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
   const reviewable = new Set(['provisional', 'identity_review', 'field_conflict']);
   const selected = [];
   const skipped = {};
   for (const customer of customers || []) {
+    if (existingSourceIds.has(String(customer.id))) {
+      skipped.existing_open_review = (skipped.existing_open_review || 0) + 1;
+      continue;
+    }
     if (selected.length >= cappedLimit) break;
     const result = resolveIdentity({ ...customer, sourceSystem: 'housecall_pro' }, {
       contacts,
@@ -297,4 +301,83 @@ export function buildIdentityReview(customer, result) {
       conflicts: result.conflicts || {},
     },
   };
+}
+
+export function selectHcpImportCandidates(customers, contacts, { limit = 25, existingSourceIds = new Set() } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || 25, 1), 50);
+  const selected = [];
+  const skipped = {};
+  const candidates = Array.isArray(contacts) ? contacts.slice() : [];
+  for (const customer of customers || []) {
+    if (existingSourceIds.has(String(customer.id))) {
+      skipped.existing_external_link = (skipped.existing_external_link || 0) + 1;
+      continue;
+    }
+    const result = resolveIdentity({ ...customer, sourceSystem: 'housecall_pro' }, {
+      contacts: candidates,
+      defaultCountry: engagementConfig().defaultPhoneCountry,
+    });
+    if (result.outcome !== 'net_new') {
+      skipped[result.outcome] = (skipped[result.outcome] || 0) + 1;
+      continue;
+    }
+    if (selected.length >= cappedLimit) continue;
+    try {
+      const projection = buildHcpCanaryProjection(customer);
+      selected.push({ customer, projection });
+      candidates.push({ id: `pending:${customer.id}`, firstName: projection.contact.firstName, lastName: projection.contact.lastName, phoneNumber: projection.contact.phoneNumber, emailAddress: projection.contact.emailAddress });
+    } catch (error) {
+      const key = error.status === 422 ? 'malformed_or_no_key' : 'invalid_candidate';
+      skipped[key] = (skipped[key] || 0) + 1;
+    }
+  }
+  return { selected, skipped, limit: cappedLimit };
+}
+
+export async function createHcpImportRun(pool, batchSize) {
+  const id = crypto.randomUUID();
+  await pool.query('INSERT INTO hcp_contact_import_runs (id, status, batch_size) VALUES ($1, $2, $3)', [id, 'running', batchSize]);
+  return { id, status: 'running', batchSize };
+}
+
+export async function getHcpImportRun(pool, runId) {
+  const result = await pool.query('SELECT * FROM hcp_contact_import_runs WHERE id = $1', [runId]);
+  return result.rows[0] || null;
+}
+
+export async function recordHcpImportBatch(pool, { runId, selectedCount, createdCount, skippedCounts, errorCode = null }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const previous = await client.query('SELECT batch_number FROM hcp_contact_import_batches WHERE run_id = $1 ORDER BY batch_number DESC LIMIT 1 FOR UPDATE', [runId]);
+    const batchNumber = Number(previous.rows[0]?.batch_number || 0) + 1;
+    await client.query(`
+      INSERT INTO hcp_contact_import_batches (run_id, batch_number, selected_count, created_count, skipped_counts, status, error_code, completed_at)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, NOW())
+    `, [runId, batchNumber, selectedCount, createdCount, JSON.stringify(skippedCounts || {}), errorCode ? 'failed' : 'complete', errorCode]);
+    await client.query(`
+      UPDATE hcp_contact_import_runs
+      SET created_count = created_count + $2,
+          existing_count = existing_count + $3,
+          reviewable_count = reviewable_count + $4,
+          malformed_count = malformed_count + $5,
+          error_code = $6,
+          updated_at = NOW()
+      WHERE id = $1
+    `, [runId, createdCount, Number(skippedCounts?.existing_external_link || 0), Number(skippedCounts?.provisional || 0) + Number(skippedCounts?.identity_review || 0) + Number(skippedCounts?.field_conflict || 0), Number(skippedCounts?.malformed_or_no_key || 0), errorCode]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function completeHcpImportRun(pool, runId) {
+  await pool.query(`
+    UPDATE hcp_contact_import_runs
+    SET status = 'complete', completed_at = NOW(), updated_at = NOW()
+    WHERE id = $1 AND status = 'running'
+  `, [runId]);
 }

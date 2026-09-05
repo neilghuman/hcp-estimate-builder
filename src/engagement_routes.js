@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, compareContactAddress, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordAddressProjection, recordDryRunDecision, selectAddressWriteCanary, selectHcpCanaryCandidates, selectIdentityReviewCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, createIdentityReview, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, updateCanaryContactAddress, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, createIdentityReview, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, updateCanaryContactAddress, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
@@ -50,8 +50,11 @@ export function registerEngagementRoutes(app, pool) {
   app.post('/api/integrations/identity/canary/hcp-reviews', requireIntegrationAuth, async (req, res) => {
     if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
     try {
-      const [customers, contacts] = await Promise.all([listCustomersForReconciliation(), listContactsForReconciliation()]);
-      const batch = selectIdentityReviewCandidates(customers, contacts, { limit: req.body?.limit });
+      const [customers, contacts, openReviews] = await Promise.all([listCustomersForReconciliation(), listContactsForReconciliation(), listOpenIdentityReviews()]);
+      const existingSourceIds = new Set(openReviews
+        .filter((review) => review.sourceSystem === 'HousecallPro' && review.sourceAccountId === process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID)
+        .map((review) => String(review.externalId)));
+      const batch = selectIdentityReviewCandidates(customers, contacts, { limit: req.body?.limit, existingSourceIds });
       const created = [];
       const existing = [];
       for (const candidate of batch.selected) {
@@ -66,6 +69,37 @@ export function registerEngagementRoutes(app, pool) {
       }
       return res.status(201).json({ canary: true, requestedLimit: batch.limit, created, existing, skipped: batch.skipped });
     } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
+  });
+
+  app.post('/api/integrations/identity/imports/hcp/batch', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    const requestedBatchSize = Math.min(Math.max(Number(req.body?.batchSize) || 25, 1), 50);
+    let run = null;
+    try {
+      run = req.body?.runId ? await getHcpImportRun(pool, String(req.body.runId)) : await createHcpImportRun(pool, requestedBatchSize);
+      if (!run) return res.status(404).json({ error: 'Import run not found.' });
+      if (run.status !== 'running') return res.status(409).json({ error: `Import run is ${run.status}.`, runId: run.id });
+      const batchSize = Number(run.batch_size || run.batchSize || requestedBatchSize);
+      const [customers, contacts, links] = await Promise.all([listCustomersForReconciliation(), listContactsForReconciliation(), listHcpIdentityLinks()]);
+      const existingSourceIds = new Set(links.map((link) => String(link.externalId)));
+      const batch = selectHcpImportCandidates(customers, contacts, { limit: batchSize, existingSourceIds });
+      const created = [];
+      for (const candidate of batch.selected) {
+        const decision = buildDryRunDecision({ sourceSystem: 'housecall_pro', sourceEventId: `import:${run.id}:${candidate.customer.id}`, record: candidate.customer, contacts });
+        const result = await createCanaryContactAndLink(candidate.projection);
+        decision.sourceEventId = `import:${run.id}:${fingerprint(candidate.customer.id)}`;
+        decision.result.contactId = result.contactId;
+        await recordDryRunDecision(pool, decision);
+        created.push({ hcpCustomerIdHash: fingerprint(candidate.customer.id), contactId: result.contactId, externalIdentityLinkId: result.linkId });
+      }
+      await recordHcpImportBatch(pool, { runId: run.id, selectedCount: batch.selected.length, createdCount: created.length, skippedCounts: batch.skipped });
+      const complete = batch.selected.length === 0;
+      if (complete) await completeHcpImportRun(pool, run.id);
+      return res.status(201).json({ runId: run.id, batchSize, created, skipped: batch.skipped, complete });
+    } catch (error) {
+      if (run?.id) await recordHcpImportBatch(pool, { runId: run.id, selectedCount: 0, createdCount: 0, skippedCounts: {}, errorCode: 'batch_failed' }).catch(() => {});
+      return res.status(error.status || 500).json({ error: error.message, runId: run?.id || null });
+    }
   });
 
   app.post('/api/integrations/identity/audit-addresses/hcp-canaries', requireIntegrationAuth, async (_req, res) => {

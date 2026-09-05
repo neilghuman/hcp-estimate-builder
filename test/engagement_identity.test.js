@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { namesMateriallyDifferent, normalizeEmail, normalizePhone, resolveIdentity } from '../src/engagement_identity.js';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, compareContactAddress, fingerprint, selectAddressWriteCanary, selectHcpCanaryCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from '../src/engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, compareContactAddress, fingerprint, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from '../src/engagement_runtime.js';
 
 const contact = {
   id: 'crm-1',
@@ -254,6 +254,16 @@ test('IdentityReview selection is capped and excludes safe net-new and malformed
   assert.equal(batch.skipped.malformed_or_no_key, 1);
 });
 
+test('IdentityReview selection skips existing open reviews before applying its cap', () => {
+  const batch = selectIdentityReviewCandidates([
+    { id: 'already-open', phone: '206-555-1212' },
+    { id: 'next-review', email: 'jane.doe@example.com' },
+  ], [contact], { existingSourceIds: new Set(['already-open']) });
+  assert.equal(batch.selected.length, 1);
+  assert.equal(batch.selected[0].customer.id, 'next-review');
+  assert.equal(batch.skipped.existing_open_review, 1);
+});
+
 test('IdentityReview payload contains decision evidence but no raw phone or email', () => {
   const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
   process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
@@ -262,5 +272,21 @@ test('IdentityReview payload contains decision evidence but no raw phone or emai
   assert.equal(review.candidateContactId, 'crm-1');
   assert.equal(review.conflictSummary, 'field_conflict');
   assert.equal(JSON.stringify(review).includes('206-555'), false);
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
+});
+
+test('resumable import selector excludes linked source IDs and keeps reviewable outcomes out of Contact creates', () => {
+  const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
+  const batch = selectHcpImportCandidates([
+    { id: 'linked', firstName: 'Already', phones: ['425-555-0100'] },
+    { id: 'review', firstName: 'Jane', phones: ['206-555-1212'] },
+    { id: 'new', firstName: 'New', phones: ['425-555-0101'] },
+  ], [contact], { limit: 50, existingSourceIds: new Set(['linked']) });
+  assert.equal(batch.limit, 50);
+  assert.equal(batch.selected.length, 1);
+  assert.equal(batch.selected[0].customer.id, 'new');
+  assert.equal(batch.skipped.existing_external_link, 1);
+  assert.equal(batch.skipped.provisional, 1);
   process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
 });

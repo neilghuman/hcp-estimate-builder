@@ -130,6 +130,17 @@ export async function listProvisionalHcpIdentityLinks() {
   return (data?.list || []).filter((link) => link.sourceSystem === 'HousecallPro' && link.linkStatus === 'Provisional');
 }
 
+export async function listHcpIdentityLinks({ pageSize = 200, maxPages = 100 } = {}) {
+  const links = [];
+  for (let offset = 0; offset < pageSize * maxPages; offset += pageSize) {
+    const data = await get(`/ExternalIdentityLink?maxSize=${pageSize}&offset=${offset}`);
+    const batch = Array.isArray(data?.list) ? data.list : [];
+    links.push(...batch.filter((link) => link.sourceSystem === 'HousecallPro'));
+    if (batch.length < pageSize) break;
+  }
+  return links;
+}
+
 export function espocrmAddressWriterConfigured() {
   const cfg = config();
   return Boolean(cfg.baseUrl && cfg.addressWriterApiKey);
@@ -173,4 +184,9 @@ export async function createIdentityReview(review) {
   const created = await post('/IdentityReview', review);
   if (!created?.id) throw new EspoCrmError('EspoCRM IdentityReview create response did not include an ID.', 502);
   return created;
+}
+
+export async function listOpenIdentityReviews() {
+  const data = await get('/IdentityReview?maxSize=200');
+  return (data?.list || []).filter((review) => review.reviewStatus === 'Open');
 }
