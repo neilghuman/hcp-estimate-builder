@@ -26,10 +26,12 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
 import { buildReminderNote, conversationIdFromSource, selectReminderStages } from './src/reminders.js';
+import { buildCallActivity, selectCallLinks } from './src/callcorrelation.js';
+import { commsConfigured, findCallEventsForPhone } from './src/commsdb.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -270,6 +272,48 @@ async function sweepDueReminders(now = new Date()) {
     }
   }
   return { skipped: false, considered: stages.length, sent, failed };
+}
+
+function callSyncEnabled() {
+  return String(process.env.ENGAGEMENT_CALLBACK_CALL_SYNC_ENABLED || 'false').toLowerCase() === 'true';
+}
+
+function callSyncLookbackDays() {
+  const n = Number(process.env.ENGAGEMENT_CALLBACK_CALL_SYNC_LOOKBACK_DAYS || 30);
+  return Math.max(1, Number.isFinite(n) ? n : 30);
+}
+
+// Correlates finalized 3CX calls (comms.call_events) to recent callbacks and
+// creates one EspoCRM Call activity per (callback, call), linked to the Contact +
+// Callback. Claim-first idempotent. Gated + best-effort. Returns a summary.
+async function sweepCallCorrelation(now = new Date()) {
+  if (!callSyncEnabled() || !commsConfigured()) return { skipped: true, created: 0, failed: 0 };
+  const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+  if (!crmConfigured) return { skipped: true, created: 0, failed: 0 };
+  const cutoff = new Date(now.getTime() - callSyncLookbackDays() * 24 * 3600 * 1000).getTime();
+  const callbacks = (await callbackStore.list()).filter((c) => c.crmId && c.phone
+    && new Date(c.createdAt || c.dueAt).getTime() >= cutoff);
+  let created = 0;
+  let failed = 0;
+  for (const callback of callbacks) {
+    let events = [];
+    try { events = await findCallEventsForPhone(callback.phone, new Date(callback.createdAt || callback.dueAt).toISOString()); }
+    catch (error) { console.warn('[CALLBACK_CALL_LOOKUP_FAILED]', callback.id, error.message); continue; }
+    for (const { callEvent } of selectCallLinks(callback, events)) {
+      if (!(await callbackStore.claimCallLink(callback.id, callEvent.threecx_call_id))) continue;
+      try {
+        const assignedUserId = await resolveOwnerUserId(callback.owner);
+        const call = await createCallRecord(buildCallActivity(callEvent, callback, { assignedUserId }));
+        await callbackStore.markCallLink(callback.id, callEvent.threecx_call_id, call.id, 'created');
+        created += 1;
+      } catch (error) {
+        failed += 1;
+        await callbackStore.markCallLink(callback.id, callEvent.threecx_call_id, null, 'failed', error.message).catch(() => {});
+        console.warn('[CALLBACK_CALL_CORRELATION_FAILED]', callback.id, callEvent.threecx_call_id, error.message);
+      }
+    }
+  }
+  return { skipped: false, created, failed };
 }
 
 async function confirmNewPanelCustomer(panel, { firstName, lastName } = {}) {
@@ -639,6 +683,16 @@ app.post('/api/callbacks/reminders/sweep', async (req, res) => {
     const now = req.body?.now ? new Date(String(req.body.now)) : new Date();
     if (Number.isNaN(now.getTime())) return res.status(400).json({ error: 'A valid now timestamp is required.' });
     res.json(await sweepDueReminders(now));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/callbacks/calls/sweep', async (req, res) => {
+  try {
+    const now = req.body?.now ? new Date(String(req.body.now)) : new Date();
+    if (Number.isNaN(now.getTime())) return res.status(400).json({ error: 'A valid now timestamp is required.' });
+    res.json(await sweepCallCorrelation(now));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1329,6 +1383,25 @@ if (remindersEnabled() && chatwootConfigured()) {
     }
   }, intervalMs).unref();
   console.log(`  Callback reminders: ENABLED (every ${intervalMs}ms, lead ${reminderLeadTimeMs() / 60000}min)`);
+}
+
+// Call correlation: gated background sweep linking 3CX calls to callbacks.
+if (callSyncEnabled() && commsConfigured()) {
+  const intervalMs = Math.max(30_000, Number(process.env.ENGAGEMENT_CALLBACK_CALL_SYNC_POLL_MS || 120_000));
+  let sweeping = false;
+  setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const result = await sweepCallCorrelation();
+      if (result.created || result.failed) console.log(`[CALLBACK_CALL_SWEEP] created=${result.created} failed=${result.failed}`);
+    } catch (error) {
+      console.warn('[CALLBACK_CALL_SWEEP_FAILED]', error.message);
+    } finally {
+      sweeping = false;
+    }
+  }, intervalMs).unref();
+  console.log(`  Call correlation: ENABLED (every ${intervalMs}ms, lookback ${callSyncLookbackDays()}d)`);
 }
 
 // --- tiny .env loader --------------------------------------------------------

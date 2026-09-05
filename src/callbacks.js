@@ -465,6 +465,21 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
         [id]
       );
     },
+    // Atomically claim a (callback, 3CX call) correlation so it becomes one Call once.
+    async claimCallLink(callbackId, threecxCallId) {
+      const result = await pool.query(
+        `INSERT INTO callback_calls (callback_id, threecx_call_id, status) VALUES ($1, $2, 'pending')
+         ON CONFLICT (callback_id, threecx_call_id) DO NOTHING RETURNING callback_id`,
+        [String(callbackId), String(threecxCallId)]
+      );
+      return result.rowCount > 0;
+    },
+    async markCallLink(callbackId, threecxCallId, crmCallId, status, detail = null) {
+      await pool.query(
+        `UPDATE callback_calls SET crm_call_id = $3, status = $4, detail = $5 WHERE callback_id = $1 AND threecx_call_id = $2`,
+        [String(callbackId), String(threecxCallId), crmCallId == null ? null : String(crmCallId), String(status), detail == null ? null : String(detail)]
+      );
+    },
     async sendReminder(id) {
       await migrate();
       const callback = await this.get(id);

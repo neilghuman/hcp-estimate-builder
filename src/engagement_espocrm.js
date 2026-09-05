@@ -407,6 +407,25 @@ export async function createMeetingRecord(meeting) {
   return { id: created.id, ...body };
 }
 
+export async function createCallRecord(call) {
+  const body = {
+    name: call.name,
+    status: call.status || 'Held',
+    direction: call.direction || 'Outbound',
+    dateStart: toEspoDateTime(call.dateStart),
+    dateEnd: toEspoDateTime(call.dateEnd) || null,
+    duration: Number.isFinite(call.duration) ? call.duration : 0,
+    parentType: call.parentType || null,
+    parentId: call.parentId || null,
+    callbackId: call.callbackId || null,
+    assignedUserId: call.assignedUserId || null,
+    description: call.description || null,
+  };
+  const created = await post('/Call', body);
+  if (!created?.id) throw new EspoCrmError('EspoCRM Call create response did not include an ID.', 502);
+  return { id: created.id, ...body };
+}
+
 export async function updateMeetingRecord(id, patch) {
   const body = {
     ...(patch?.status !== undefined ? { status: patch.status } : {}),
