@@ -336,6 +336,7 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
         completedAt: row.completed_at || null,
         completedBy: row.completed_by || null,
         crmId: row.crm_id || null,
+        crmMeetingId: row.crm_meeting_id || null,
         idempotencyKey: row.idempotency_key || null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -362,6 +363,7 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
         completedAt: row.completed_at || null,
         completedBy: row.completed_by || null,
         crmId: row.crm_id || null,
+        crmMeetingId: row.crm_meeting_id || null,
         idempotencyKey: row.idempotency_key || null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -389,6 +391,7 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
         completedAt: row.completed_at || null,
         completedBy: row.completed_by || null,
         crmId: row.crm_id || null,
+        crmMeetingId: row.crm_meeting_id || null,
         idempotencyKey: row.idempotency_key || null,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -423,6 +426,19 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
       await pool.query(
         `UPDATE ${table} SET crm_id = $2, updated_at = $3 WHERE id = $1`,
         [id, updated.crmId, updated.updatedAt]
+      );
+      return updated;
+    },
+    async setMeetingId(id, meetingId) {
+      await migrate();
+      const existing = await this.get(id);
+      if (!existing) throw new Error(`Callback ${id} was not found.`);
+      const value = String(meetingId || '').trim();
+      if (!value) throw new Error('A CRM meeting ID is required.');
+      const updated = { ...existing, crmMeetingId: value, updatedAt: new Date().toISOString() };
+      await pool.query(
+        `UPDATE ${table} SET crm_meeting_id = $2, updated_at = $3 WHERE id = $1`,
+        [id, updated.crmMeetingId, updated.updatedAt]
       );
       return updated;
     },
