@@ -193,10 +193,10 @@ export function selectPrimaryHcpAddress(addresses) {
   const complete = (addresses || []).map(normalizeHcpAddress).filter(Boolean);
   const services = complete.filter((address) => address.type === 'service');
   const billings = complete.filter((address) => address.type === 'billing');
-  if (services.length === 1) return { status: 'selected_service', address: services[0] };
-  if (services.length > 1) return { status: 'ambiguous_multiple_service_addresses', address: null };
   if (billings.length === 1) return { status: 'selected_billing_fallback', address: billings[0] };
-  if (billings.length > 1 || complete.length > 1) return { status: 'ambiguous_multiple_addresses', address: null };
+  if (billings.length > 1) return { status: 'ambiguous_multiple_billing_addresses', address: null };
+  if (services.length === 1) return { status: 'selected_service_fallback', address: services[0] };
+  if (services.length > 1 || complete.length > 1) return { status: 'ambiguous_multiple_service_addresses', address: null };
   return { status: 'no_complete_address', address: null };
 }
 
@@ -219,7 +219,7 @@ export function compareContactAddress(contact, hcpAddress) {
 }
 
 export function summarizeAddressAudit(rows) {
-  const counts = { total: 0, crm_blank: 0, match: 0, conflict: 0, no_complete_address: 0, ambiguous_multiple_service_addresses: 0, ambiguous_multiple_addresses: 0 };
+  const counts = { total: 0, crm_blank: 0, match: 0, conflict: 0, no_complete_address: 0, ambiguous_multiple_billing_addresses: 0, ambiguous_multiple_service_addresses: 0 };
   const examples = [];
   for (const row of rows || []) {
     counts.total += 1;

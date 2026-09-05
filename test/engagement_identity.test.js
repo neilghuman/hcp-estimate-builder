@@ -155,12 +155,14 @@ test('HCP batch canary skips records that match a Contact or lack a usable ident
   process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
 });
 
-test('address selection prefers one service address and falls back to one billing address', () => {
+test('address selection prefers one billing address, then falls back to one service address', () => {
   const service = { id: 'adr-service', type: 'service', street: '1 Main St', city: 'Seattle', state: 'WA', zip: '98101', country: 'US' };
   const billing = { id: 'adr-billing', type: 'billing', street: '2 Main St', city: 'Seattle', state: 'WA', zip: '98102', country: 'US' };
-  assert.equal(selectPrimaryHcpAddress([billing, service]).status, 'selected_service');
+  assert.equal(selectPrimaryHcpAddress([billing, service]).status, 'selected_billing_fallback');
   assert.equal(selectPrimaryHcpAddress([billing]).status, 'selected_billing_fallback');
+  assert.equal(selectPrimaryHcpAddress([service]).status, 'selected_service_fallback');
   assert.equal(selectPrimaryHcpAddress([service, { ...service, id: 'adr-service-2' }]).status, 'ambiguous_multiple_service_addresses');
+  assert.equal(selectPrimaryHcpAddress([billing, { ...billing, id: 'adr-billing-2' }]).status, 'ambiguous_multiple_billing_addresses');
 });
 
 test('address comparison only permits a blank CRM address or reports an exact match', () => {
