@@ -142,6 +142,36 @@ export function registerEngagementRoutes(app, pool) {
     }
   });
 
+  app.post('/api/integrations/identity/canary/hcp-addresses-100', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    let stage = 'load_candidates';
+    try {
+      const links = await listProvisionalHcpIdentityLinks();
+      const rows = await Promise.all(links.map(async (link) => ({
+        contactId: link.contactId,
+        linkId: link.id,
+        contact: await getContactForAddressAudit(link.contactId),
+        addresses: await listCustomerAddresses(link.externalId),
+      })));
+      const batch = selectAddressWriteCanary(rows, { limit: req.body?.limit, maxLimit: 100 });
+      const updated = [];
+      for (const candidate of batch.selected) {
+        stage = `update:${candidate.contactId}`;
+        const contact = await updateCanaryContactAddress(candidate.contactId, candidate.address);
+        stage = `verify:${candidate.contactId}`;
+        const verification = compareContactAddress(contact, candidate.address);
+        if (verification.status !== 'match') throw new Error(`Contact address read-back did not match for ${candidate.contactId}.`);
+        stage = `audit:${candidate.contactId}`;
+        await recordAddressProjection(pool, { contactId: candidate.contactId, linkId: candidate.linkId, addressId: candidate.address.id });
+        updated.push({ contactId: candidate.contactId, linkId: candidate.linkId, addressType: candidate.address.type, hcpAddressIdHash: fingerprint(candidate.address.id) });
+      }
+      return res.status(201).json({ canary: true, requestedLimit: batch.limit, updated, skipped: batch.skipped });
+    } catch (error) {
+      console.error('[ENGAGEMENT_ADDRESS_CANARY_FAILED]', { stage, message: error.message });
+      return res.status(error.status || 500).json({ error: error.message, stage });
+    }
+  });
+
   app.post('/api/integrations/identity/dry-run', requireIntegrationAuth, async (req, res) => {
     try {
       const decision = buildDryRunDecision(req.body || {});

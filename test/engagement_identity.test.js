@@ -229,6 +229,18 @@ test('expanded address backfill selector permits at most twenty-five writes', ()
   assert.equal(batch.selected.length, 25);
 });
 
+test('larger address backfill selector permits at most one hundred writes', () => {
+  const rows = Array.from({ length: 120 }, (_value, index) => ({
+    contactId: `crm-large-${index}`,
+    linkId: `link-large-${index}`,
+    contact: {},
+    addresses: [{ id: `adr-large-${index}`, type: 'billing', street: `${index} Main St`, city: 'Seattle', state: 'WA', zip: '98101' }],
+  }));
+  const batch = selectAddressWriteCanary(rows, { limit: 200, maxLimit: 100 });
+  assert.equal(batch.limit, 100);
+  assert.equal(batch.selected.length, 100);
+});
+
 test('IdentityReview selection is capped and excludes safe net-new and malformed outcomes', () => {
   const batch = selectIdentityReviewCandidates([
     { id: 'review', phone: '206-555-1212' },
