@@ -5,6 +5,7 @@ import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityR
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 import { chatwootConfigured, getConversation } from './chatwoot.js';
 import { completeLiveSyncRun, createLiveSyncRun, failLiveSyncRun, getLiveSyncState, saveLiveSyncCursor, selectLiveSyncWork } from './engagement_livesync.js';
+import { buildDuplicateReview, completeFuzzyDedupRun, createFuzzyDedupRun, failFuzzyDedupRun, findDuplicateClusters } from './engagement_fuzzy.js';
 
 function credentialsMatch(actual, expected) {
   const left = Buffer.from(String(actual || ''));
@@ -14,6 +15,54 @@ function credentialsMatch(actual, expected) {
 
 export function hcpLiveSyncEnabled() {
   return engagementConfig().hcpLiveSyncEnabled;
+}
+
+export function fuzzyDedupEnabled() {
+  return engagementConfig().fuzzyDedupEnabled;
+}
+
+// One fuzzy duplicate-contact sweep. Scans EspoCRM Contacts for near-duplicate clusters and
+// queues each new cluster to IdentityReview (idempotent via cluster hash). Never merges.
+export async function sweepFuzzyDuplicates(pool, { now: _now = new Date() } = {}) {
+  const cfg = engagementConfig();
+  if (!cfg.fuzzyDedupEnabled) return { skipped: true, reason: 'disabled' };
+  if (!cfg.identityWritesEnabled) return { skipped: true, reason: 'identity_writes_off' };
+  if (!espocrmWriterConfigured()) return { skipped: true, reason: 'espocrm_writer_unconfigured' };
+
+  const nameStrong = Math.min(Math.max(Number(process.env.ENGAGEMENT_FUZZY_NAME_STRONG) || 0.85, 0), 1);
+  const maxReviews = Math.min(Math.max(Number(process.env.ENGAGEMENT_FUZZY_MAX_REVIEWS) || 25, 1), 100);
+
+  const [contacts, openReviews] = await Promise.all([listContactsForReconciliation(), listOpenIdentityReviews()]);
+  const contactsById = new Map(contacts.map((contact) => [String(contact.id), contact]));
+  const existingKeys = new Set(openReviews
+    .filter((review) => review.conflictSummary === 'fuzzy_duplicate')
+    .map((review) => String(review.externalId)));
+  const clusters = findDuplicateClusters(contacts, { nameStrong, defaultCountry: cfg.defaultPhoneCountry });
+
+  const runId = await createFuzzyDedupRun(pool);
+  try {
+    const created = [];
+    const existing = [];
+    const failed = [];
+    for (const cluster of clusters) {
+      if (created.length >= maxReviews) break;
+      if (existingKeys.has(cluster.clusterKey)) { existing.push({ clusterKey: cluster.clusterKey }); continue; }
+      try {
+        const review = buildDuplicateReview(cluster, contactsById);
+        const open = await findOpenIdentityReview(review);
+        if (open) { existing.push({ clusterKey: cluster.clusterKey, identityReviewId: open.id }); continue; }
+        const inserted = await createIdentityReview(review);
+        created.push({ identityReviewId: inserted.id, clusterKey: cluster.clusterKey, size: cluster.contactIds.length });
+      } catch (error) {
+        failed.push({ clusterKey: cluster.clusterKey, error: error.message });
+      }
+    }
+    await completeFuzzyDedupRun(pool, runId, { contactsScanned: contacts.length, clustersFound: clusters.length, reviewsCreated: created.length, reviewsExisting: existing.length, failed: failed.length });
+    return { skipped: false, contactsScanned: contacts.length, clustersFound: clusters.length, created: created.length, existing: existing.length, failed: failed.length, clusters: created };
+  } catch (error) {
+    await failFuzzyDedupRun(pool, runId, 'fuzzy_dedup_failed').catch(() => {});
+    throw error;
+  }
 }
 
 // One incremental HCP -> EspoCRM live-sync tick. Reuses the gated canary projection and
@@ -94,7 +143,7 @@ export async function sweepHcpLiveSync(pool, { now = new Date() } = {}) {
 export function registerEngagementRoutes(app, pool) {
   app.get('/api/integrations/identity/config', (_req, res) => {
     const config = engagementConfig();
-    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, chatwootWebhookEnabled: config.chatwootWebhookEnabled, hcpLiveSyncEnabled: config.hcpLiveSyncEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), espocrmAddressWriterConfigured: espocrmAddressWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
+    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, chatwootWebhookEnabled: config.chatwootWebhookEnabled, hcpLiveSyncEnabled: config.hcpLiveSyncEnabled, fuzzyDedupEnabled: config.fuzzyDedupEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), espocrmAddressWriterConfigured: espocrmAddressWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
   });
 
   const requireIntegrationAuth = (req, res, next) => {
@@ -406,6 +455,17 @@ export function registerEngagementRoutes(app, pool) {
     if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
     try {
       const result = await sweepHcpLiveSync(pool);
+      return res.status(200).json(result);
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/integrations/identity/fuzzy-dedup/sweep', requireIntegrationAuth, async (_req, res) => {
+    if (!engagementConfig().fuzzyDedupEnabled) return res.status(403).json({ error: 'ENGAGEMENT_FUZZY_DEDUP_ENABLED is off.' });
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    try {
+      const result = await sweepFuzzyDuplicates(pool);
       return res.status(200).json(result);
     } catch (error) {
       return res.status(error.status || 500).json({ error: error.message });
