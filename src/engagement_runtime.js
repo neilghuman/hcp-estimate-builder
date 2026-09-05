@@ -13,6 +13,7 @@ export function engagementConfig() {
     reconciliationEnabled: String(process.env.ENGAGEMENT_RECONCILIATION_ENABLED || 'false').toLowerCase() === 'true',
     chatwootWebhookEnabled: String(process.env.ENGAGEMENT_CHATWOOT_WEBHOOK_ENABLED || 'false').toLowerCase() === 'true',
     hcpLiveSyncEnabled: String(process.env.ENGAGEMENT_HCP_LIVE_SYNC_ENABLED || 'false').toLowerCase() === 'true',
+    fuzzyDedupEnabled: String(process.env.ENGAGEMENT_FUZZY_DEDUP_ENABLED || 'false').toLowerCase() === 'true',
     defaultPhoneCountry: String(process.env.ENGAGEMENT_DEFAULT_PHONE_COUNTRY || 'US').toUpperCase(),
   };
 }
