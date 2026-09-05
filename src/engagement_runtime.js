@@ -257,3 +257,44 @@ export async function recordAddressProjection(pool, { contactId, linkId, address
     ON CONFLICT (source_system, source_event_id) DO NOTHING
   `, ['housecall_pro', sourceEventId, 'identity.address_canary', contactId, crypto.randomUUID()]);
 }
+
+export function selectIdentityReviewCandidates(customers, contacts, { limit = 10 } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+  const reviewable = new Set(['provisional', 'identity_review', 'field_conflict']);
+  const selected = [];
+  const skipped = {};
+  for (const customer of customers || []) {
+    if (selected.length >= cappedLimit) break;
+    const result = resolveIdentity({ ...customer, sourceSystem: 'housecall_pro' }, {
+      contacts,
+      defaultCountry: engagementConfig().defaultPhoneCountry,
+    });
+    if (!reviewable.has(result.outcome)) {
+      skipped[result.outcome] = (skipped[result.outcome] || 0) + 1;
+      continue;
+    }
+    selected.push({ customer, result });
+  }
+  return { selected, skipped, limit: cappedLimit };
+}
+
+export function buildIdentityReview(customer, result) {
+  const sourceAccountId = String(process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID || '').trim();
+  if (!sourceAccountId) throw Object.assign(new Error('ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID is not configured.'), { status: 503 });
+  return {
+    name: `HCP identity review: ${fingerprint(customer.id).slice(0, 12)}`,
+    sourceSystem: 'HousecallPro',
+    sourceAccountId,
+    externalId: String(customer.id),
+    hcpCustomerId: String(customer.id),
+    reviewStatus: 'Open',
+    candidateContactId: result.contactId || null,
+    conflictSummary: result.outcome,
+    matchingEvidence: {
+      outcome: result.outcome,
+      reason: result.reason || null,
+      candidateContactIds: result.candidateContactIds || [],
+      conflicts: result.conflicts || {},
+    },
+  };
+}

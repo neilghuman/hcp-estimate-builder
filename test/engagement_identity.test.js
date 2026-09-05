@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { namesMateriallyDifferent, normalizeEmail, normalizePhone, resolveIdentity } from '../src/engagement_identity.js';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, compareContactAddress, fingerprint, selectAddressWriteCanary, selectHcpCanaryCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from '../src/engagement_runtime.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, compareContactAddress, fingerprint, selectAddressWriteCanary, selectHcpCanaryCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from '../src/engagement_runtime.js';
 
 const contact = {
   id: 'crm-1',
@@ -215,4 +215,28 @@ test('address write canary selects only blank unambiguous Contacts and caps at t
   assert.equal(batch.selected.length, 1);
   assert.equal(batch.selected[0].contactId, 'crm-blank');
   assert.deepEqual(batch.skipped, { conflict: 1, ambiguous_multiple_service_addresses: 1 });
+});
+
+test('IdentityReview selection is capped and excludes safe net-new and malformed outcomes', () => {
+  const batch = selectIdentityReviewCandidates([
+    { id: 'review', phone: '206-555-1212' },
+    { id: 'new', phone: '425-555-0100' },
+    { id: 'malformed', phone: 'extension 3' },
+  ], [contact], { limit: 50 });
+  assert.equal(batch.limit, 10);
+  assert.equal(batch.selected.length, 1);
+  assert.equal(batch.selected[0].result.outcome, 'provisional');
+  assert.equal(batch.skipped.net_new, 1);
+  assert.equal(batch.skipped.malformed_or_no_key, 1);
+});
+
+test('IdentityReview payload contains decision evidence but no raw phone or email', () => {
+  const original = process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID;
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = 'hcp-production-shared';
+  const review = buildIdentityReview({ id: 'cus_123' }, { outcome: 'field_conflict', contactId: 'crm-1', conflicts: { phone: true } });
+  assert.equal(review.reviewStatus, 'Open');
+  assert.equal(review.candidateContactId, 'crm-1');
+  assert.equal(review.conflictSummary, 'field_conflict');
+  assert.equal(JSON.stringify(review).includes('206-555'), false);
+  process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = original;
 });

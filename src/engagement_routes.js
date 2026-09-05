@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, compareContactAddress, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordAddressProjection, recordDryRunDecision, selectAddressWriteCanary, selectHcpCanaryCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, getContactForAddressAudit, getEspoCrmInventory, updateCanaryContactAddress, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, compareContactAddress, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, recordAddressProjection, recordDryRunDecision, selectAddressWriteCanary, selectHcpCanaryCandidates, selectIdentityReviewCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, createIdentityReview, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, updateCanaryContactAddress, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
@@ -45,6 +45,27 @@ export function registerEngagementRoutes(app, pool) {
       if (runId) await finishReconciliationRun(pool, runId, { errorCode: 'reconciliation_failed' }).catch(() => {});
       return res.status(error.status || 500).json({ error: error.message });
     }
+  });
+
+  app.post('/api/integrations/identity/canary/hcp-reviews', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    try {
+      const [customers, contacts] = await Promise.all([listCustomersForReconciliation(), listContactsForReconciliation()]);
+      const batch = selectIdentityReviewCandidates(customers, contacts, { limit: req.body?.limit });
+      const created = [];
+      const existing = [];
+      for (const candidate of batch.selected) {
+        const review = buildIdentityReview(candidate.customer, candidate.result);
+        const open = await findOpenIdentityReview(review);
+        if (open) {
+          existing.push({ identityReviewId: open.id, hcpCustomerIdHash: fingerprint(candidate.customer.id), outcome: candidate.result.outcome });
+          continue;
+        }
+        const inserted = await createIdentityReview(review);
+        created.push({ identityReviewId: inserted.id, hcpCustomerIdHash: fingerprint(candidate.customer.id), outcome: candidate.result.outcome });
+      }
+      return res.status(201).json({ canary: true, requestedLimit: batch.limit, created, existing, skipped: batch.skipped });
+    } catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
   });
 
   app.post('/api/integrations/identity/audit-addresses/hcp-canaries', requireIntegrationAuth, async (_req, res) => {
