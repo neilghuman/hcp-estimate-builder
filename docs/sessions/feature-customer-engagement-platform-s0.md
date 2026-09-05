@@ -271,6 +271,27 @@ matches. Final read-only verification: 11 total, 11 `match`, 0 blank, 0 conflict
 ambiguities. All 11 Contacts now have one verified native EspoCRM address; no additional HCP
 service address was projected. Both feature gates are disabled.
 
+## Expanded 25-Record HCP Contact Import
+
+Owner-approved and completed on 2026-09-05. This is a distinct endpoint with a hard cap of 25;
+the prior 10-record canary remains capped at 10. It reuses the same sequential create-only Contact
+and ExternalIdentityLink path. Address projection is deliberately not part of this import.
+
+Fresh verified backups preceded the run:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/hcp-import-25-prerun-20260905T001839Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/hcp-import-25-prerun-20260905T001844Z`
+
+The batch created 25 `net_new` Contacts and 25 provisional ExternalIdentityLinks. It safely skipped
+9 existing external-link matches and 1 provisional match. Totals after the run: 36 Contacts, 36
+ExternalIdentityLinks, 36 distinct linked Contacts, and 0 duplicate source identity tuples. The
+legacy HcpCustomerLink projection remains unchanged at 1,416 rows. The global write gate was
+returned to `false` automatically after the run.
+
+An independent read-only comparison of all 36 provisional links against live HCP source records
+passed 36/36: normalized name matched and at least one normalized identity key matched for every
+link. No HCP, Chatwoot, or additional EspoCRM data was written by the review.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
