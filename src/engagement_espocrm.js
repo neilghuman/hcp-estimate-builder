@@ -433,6 +433,22 @@ export async function createCallRecord(call) {
   return { id: created.id, ...body };
 }
 
+export async function createTaskRecord(task) {
+  const body = {
+    name: task.name,
+    status: task.status || 'Not Started',
+    priority: task.priority || 'Normal',
+    dateEnd: toEspoDateTime(task.dateEnd) || null,
+    parentType: task.parentType || null,
+    parentId: task.parentId || null,
+    assignedUserId: task.assignedUserId || null,
+    description: task.description || null,
+  };
+  const created = await post('/Task', body);
+  if (!created?.id) throw new EspoCrmError('EspoCRM Task create response did not include an ID.', 502);
+  return { id: created.id, ...body };
+}
+
 export async function updateMeetingRecord(id, patch) {
   const body = {
     ...(patch?.status !== undefined ? { status: patch.status } : {}),

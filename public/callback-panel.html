@@ -8,21 +8,33 @@
 </head>
 <body>
   <main class="panel">
-    <header><p class="eyebrow">Customer engagement</p><h1>Schedule callback</h1><p id="customer" class="customer">Loading customer...</p></header>
+    <header><p class="eyebrow">Customer engagement</p><h1>Customer follow-up</h1><p id="customer" class="customer">Loading customer...</p></header>
     <div id="identity" class="notice" hidden></div>
     <a id="crmLink" class="crm-link" href="#" target="_blank" rel="noreferrer" hidden>Open CRM Contact</a>
     <button id="callBtn" type="button" class="call-btn" hidden>Call via 3CX</button>
     <section id="openCallbacks" hidden><h2>Open callbacks</h2><ul id="callbackList"></ul></section>
-    <form id="form" hidden>
-      <div id="customerNameField" class="name-fields" hidden>
-        <label>First name<input id="firstName" name="firstName" autocomplete="given-name" /></label>
-        <label>Last name<input id="lastName" name="lastName" autocomplete="family-name" /></label>
-      </div>
+    <div id="customerNameField" class="name-fields shared-fields" hidden>
+      <label>First name<input id="firstName" name="firstName" autocomplete="given-name" /></label>
+      <label>Last name<input id="lastName" name="lastName" autocomplete="family-name" /></label>
+    </div>
+    <nav id="tabs" class="tabs" hidden>
+      <button type="button" class="tab is-active" data-tab="callback">Callback</button>
+      <button type="button" class="tab" data-tab="task">Task</button>
+    </nav>
+    <form id="callbackForm" hidden>
       <p id="owner" class="owner" hidden></p>
       <label>Due date and time<input id="dueAt" name="dueAt" type="datetime-local" required /></label>
       <p class="timezone">Pacific time</p>
       <label>Reason<textarea id="reason" name="reason" rows="3" required placeholder="What needs to happen on this callback?"></textarea></label>
       <button id="submit" type="submit">Schedule callback</button>
+    </form>
+    <form id="taskForm" hidden>
+      <p id="taskOwner" class="owner" hidden></p>
+      <label>Task title<input id="taskTitle" name="taskTitle" required placeholder="Research and call customer back" /></label>
+      <label>Due date and time<input id="taskDueAt" name="taskDueAt" type="datetime-local" required /></label>
+      <p class="timezone">Pacific time</p>
+      <label>Details<textarea id="taskDetails" name="taskDetails" rows="4" placeholder="What do you need to remember before following up?"></textarea></label>
+      <button id="taskSubmit" type="submit">Create task</button>
     </form>
     <p id="message" class="message" role="status"></p>
   </main>

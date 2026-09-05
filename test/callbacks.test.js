@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildCallbackCommandCenter, buildCallbackQueue, createCallbackStore, createPersistedCallbackStore, findDueCallbacks, rescheduleCallback, scheduleCallback, sendReminderForCallback, updateCallbackStatus } from '../src/callbacks.js';
-import { createCallbackRecord, createMeetingRecord, deleteMeetingRecord, findUserIdByEmail, listCallbackRecords, updateCallbackRecord, updateMeetingRecord } from '../src/engagement_espocrm.js';
+import { createCallbackRecord, createMeetingRecord, createTaskRecord, deleteMeetingRecord, findUserIdByEmail, listCallbackRecords, updateCallbackRecord, updateMeetingRecord } from '../src/engagement_espocrm.js';
 
 test('scheduleCallback requires a valid contact or phone and a due time', () => {
   assert.throws(() => scheduleCallback({ reason: 'Follow-up', dueAt: null }), /contactId/i);
@@ -334,6 +334,40 @@ test('EspoCRM meeting adapter formats datetimes and assigns the owner for calend
     assert.equal(post.body.parentType, 'Contact');
     assert.equal(post.body.parentId, 'contact-9');
     assert.equal(post.body.status, 'Planned');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('EspoCRM task adapter links a due task to the customer Contact', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method || 'GET', body: init.body ? JSON.parse(init.body) : null });
+    return { ok: true, text: async () => JSON.stringify({ id: 'task-1' }) };
+  };
+  try {
+    process.env.ENGAGEMENT_ESPOCRM_BASE_URL = 'https://crm.test';
+    process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY = 'writer-key';
+    const created = await createTaskRecord({
+      name: 'Research permit notes and call back',
+      dateEnd: '2026-09-06T16:00:00Z',
+      parentType: 'Contact',
+      parentId: 'contact-9',
+      assignedUserId: 'user-9',
+      description: 'Source: Chatwoot conversation 123',
+    });
+    assert.equal(created.id, 'task-1');
+    const post = calls.find((call) => call.method === 'POST');
+    assert.match(String(post.url), /\/Task$/);
+    assert.equal(post.body.name, 'Research permit notes and call back');
+    assert.equal(post.body.status, 'Not Started');
+    assert.equal(post.body.priority, 'Normal');
+    assert.equal(post.body.dateEnd, '2026-09-06 16:00:00');
+    assert.doesNotMatch(String(post.body.dateEnd), /[TZ]/);
+    assert.equal(post.body.parentType, 'Contact');
+    assert.equal(post.body.parentId, 'contact-9');
+    assert.equal(post.body.assignedUserId, 'user-9');
   } finally {
     globalThis.fetch = originalFetch;
   }
