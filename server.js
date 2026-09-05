@@ -97,6 +97,14 @@ function callbackWritesEnabled() {
   return String(process.env.ENGAGEMENT_CALLBACK_WRITES_ENABLED || 'false').toLowerCase() === 'true';
 }
 
+function dashboardAgent(value) {
+  const agent = value && typeof value === 'object' ? value : {};
+  const id = String(agent.id || '').trim();
+  const name = String(agent.name || agent.email || '').trim();
+  if (!id || !name) throw Object.assign(new Error('Chatwoot agent context is required.'), { status: 422 });
+  return { id, name };
+}
+
 function activeCallbacks(callbacks) {
   return callbacks.filter((callback) => !['completed', 'rescheduled', 'cancelled'].includes(callback.status));
 }
@@ -130,12 +138,13 @@ async function syncNewCallbackToCrm(callback) {
   return callback;
 }
 
-async function confirmNewPanelCustomer(panel, customerName) {
-  const nameParts = String(customerName || '').trim().split(/\s+/).filter(Boolean);
-  if (!nameParts.length) throw Object.assign(new Error('Customer name is required for a new customer.'), { status: 422 });
+async function confirmNewPanelCustomer(panel, { firstName, lastName } = {}) {
+  const first = String(firstName || '').trim();
+  const last = String(lastName || '').trim();
+  if (!first || !last) throw Object.assign(new Error('First and last name are required for a new customer.'), { status: 422 });
   const sourceAccountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
   const created = await createCanaryContactAndLink({
-    contact: { firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || 'Customer', phoneNumber: panel.context.contact.phone, emailAddress: panel.context.contact.email },
+    contact: { firstName: first, lastName: last, phoneNumber: panel.context.contact.phone, emailAddress: panel.context.contact.email },
     link: { name: `Chatwoot:${sourceAccountId}:${panel.context.contact.id}`, sourceSystem: 'Chatwoot', sourceAccountId, externalId: panel.context.contact.id, linkStatus: 'Confirmed', matchingEvidence: { source: 'callback-panel-new-customer', conversationId: panel.context.conversationId } },
     skipDuplicateCheck: true,
   });
@@ -149,10 +158,15 @@ const USER = process.env.PORTAL_USER;
 const PASS = process.env.PORTAL_PASS;
 if (USER && PASS) {
   app.use((req, res, next) => {
+    const dashboardSecret = String(process.env.ENGAGEMENT_DASHBOARD_PROXY_SECRET || '');
+    if (dashboardSecret && req.get('x-engagement-dashboard-proxy') === dashboardSecret) return next();
     const hdr = req.headers.authorization || '';
     const [, b64] = hdr.split(' ');
     const [u, p] = Buffer.from(b64 || '', 'base64').toString().split(':');
-    if (u === USER && p === PASS) return next();
+    if (u === USER && p === PASS) {
+      req.portalUser = u;
+      return next();
+    }
     res.set('WWW-Authenticate', 'Basic realm="HCP Estimate Builder"').status(401).send('Auth required.');
   });
 }
@@ -327,6 +341,7 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
   if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
   try {
     const panel = await loadCallbackPanelContext(conversationId);
+    const agent = dashboardAgent({ id: req.query.agentId, name: req.query.agentName });
     res.json({
       conversationId: panel.context.conversationId,
       customer: { name: panel.context.contact.name, phone: panel.context.contact.phone, email: panel.context.contact.email },
@@ -334,6 +349,8 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
       crmUrl: panel.crmUrl,
       callbacks: panel.callbacks,
       callbackWritesEnabled: callbackWritesEnabled(),
+      owner: agent.name,
+      timezone: 'America/Los_Angeles',
     });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
@@ -348,9 +365,10 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
   if (!callbackWritesEnabled()) return res.status(403).json({ error: 'ENGAGEMENT_CALLBACK_WRITES_ENABLED is off.' });
   try {
     const panel = await loadCallbackPanelContext(conversationId);
+    const agent = dashboardAgent(req.body?.agent);
     let contactId = panel.context.identity.contactId;
     if (panel.context.identity.outcome === 'net_new') {
-      contactId = (await confirmNewPanelCustomer(panel, req.body?.customerName)).contactId;
+      contactId = (await confirmNewPanelCustomer(panel, req.body)).contactId;
     } else if (panel.context.identity.outcome !== 'auto_confirmed' || !contactId) {
       return res.status(409).json({ error: 'Confirm the CRM customer before scheduling a callback.', identity: panel.context.identity });
     }
@@ -358,8 +376,8 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
       contactId: String(contactId),
       phone: panel.context.contact.phone,
       dueAt: req.body?.dueAt,
-      timezone: req.body?.timezone,
-      owner: req.body?.owner,
+      timezone: 'America/Los_Angeles',
+      owner: agent.name,
       reason: req.body?.reason,
       source: `chatwoot:conversation:${panel.context.conversationId}`,
       idempotencyKey,
