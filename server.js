@@ -26,7 +26,9 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, updateCallbackRecord } from './src/engagement_espocrm.js';
+import { createCallbackRecord, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord } from './src/engagement_espocrm.js';
+import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
+import { chatwootConfigured, getConversation, setConversationLabels } from './src/chatwoot.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -90,6 +92,43 @@ app.use(express.json({ limit: '2mb' }));
 const callbackStore = createPersistedCallbackStore({ pool, table: 'callback_records' });
 const searchCache = new Map();
 const customerCache = new Map();
+
+function callbackWritesEnabled() {
+  return String(process.env.ENGAGEMENT_CALLBACK_WRITES_ENABLED || 'false').toLowerCase() === 'true';
+}
+
+function activeCallbacks(callbacks) {
+  return callbacks.filter((callback) => !['completed', 'rescheduled', 'cancelled'].includes(callback.status));
+}
+
+function labelTitles(conversation) {
+  const labels = conversation?.labels || conversation?.meta?.labels || [];
+  return labels.map((label) => typeof label === 'string' ? label : label.title).filter(Boolean);
+}
+
+async function loadCallbackPanelContext(conversationId) {
+  if (!chatwootConfigured()) throw Object.assign(new Error('Chatwoot is not configured.'), { status: 503 });
+  const conversation = await getConversation(conversationId);
+  const chatwootContactId = conversation?.meta?.sender?.id ?? conversation?.contact_id ?? conversation?.contact?.id;
+  if (!chatwootContactId) throw Object.assign(new Error('The Chatwoot conversation has no customer contact.'), { status: 422 });
+  const [contacts, existingLink] = await Promise.all([
+    listContactsForReconciliation(),
+    findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId: process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID, externalId: String(chatwootContactId) }),
+  ]);
+  const context = resolveChatwootConversationContext(conversation, { contacts, existingLink, defaultCountry: process.env.ENGAGEMENT_DEFAULT_PHONE_COUNTRY || 'US' });
+  const callbacks = context.identity.contactId ? activeCallbacks((await callbackStore.list()).filter((callback) => callback.contactId === String(context.identity.contactId))) : [];
+  const crmBase = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
+  return { context, conversation, callbacks, crmUrl: context.identity.contactId && crmBase ? `${crmBase}/#Contact/view/${context.identity.contactId}` : null };
+}
+
+async function syncNewCallbackToCrm(callback) {
+  const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+  if (!crmConfigured || callback.crmId) return callback;
+  const crmCallback = await createCallbackRecord(callback);
+  Object.assign(callback, await callbackStore.setCrmId(callback.id, crmCallback.id));
+  callback.crm = crmCallback;
+  return callback;
+}
 
 // Optional HTTP Basic Auth gate.
 const USER = process.env.PORTAL_USER;
@@ -269,19 +308,62 @@ app.get('/api/callbacks/:id', async (req, res) => {
   }
 });
 
+app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
+  const conversationId = String(req.params.conversationId || '').trim();
+  if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+  try {
+    const panel = await loadCallbackPanelContext(conversationId);
+    res.json({
+      conversationId: panel.context.conversationId,
+      customer: { name: panel.context.contact.name, phone: panel.context.contact.phone, email: panel.context.contact.email },
+      identity: panel.context.identity,
+      crmUrl: panel.crmUrl,
+      callbacks: panel.callbacks,
+      callbackWritesEnabled: callbackWritesEnabled(),
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req, res) => {
+  const conversationId = String(req.params.conversationId || '').trim();
+  const idempotencyKey = String(req.get('x-idempotency-key') || '').trim();
+  if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+  if (idempotencyKey.length < 12 || idempotencyKey.length > 200) return res.status(400).json({ error: 'A valid idempotency key is required.' });
+  if (!callbackWritesEnabled()) return res.status(403).json({ error: 'ENGAGEMENT_CALLBACK_WRITES_ENABLED is off.' });
+  try {
+    const panel = await loadCallbackPanelContext(conversationId);
+    if (panel.context.identity.outcome !== 'auto_confirmed' || !panel.context.identity.contactId) {
+      return res.status(409).json({ error: 'Confirm the CRM customer before scheduling a callback.', identity: panel.context.identity });
+    }
+    const result = await callbackStore.createOnce({
+      contactId: String(panel.context.identity.contactId),
+      phone: panel.context.contact.phone,
+      dueAt: req.body?.dueAt,
+      timezone: req.body?.timezone,
+      owner: req.body?.owner,
+      reason: req.body?.reason,
+      source: `chatwoot:conversation:${panel.context.conversationId}`,
+      idempotencyKey,
+    });
+    const callback = await syncNewCallbackToCrm(result.callback);
+    try {
+      await setConversationLabels(panel.context.conversationId, Array.from(new Set([...labelTitles(panel.conversation), 'A_pending_callback'])));
+    } catch (error) {
+      console.warn('[CALLBACK_PANEL_LABEL_SYNC_FAILED]', error.message);
+    }
+    res.status(result.replayed ? 200 : 201).json({ callback, replayed: result.replayed, crmUrl: callback.crmId && process.env.ENGAGEMENT_ESPOCRM_BASE_URL ? `${String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL).replace(/\/$/, '')}/#Callback/view/${callback.crmId}` : null });
+  } catch (error) {
+    res.status(error.status || 400).json({ error: error.message });
+  }
+});
+
 app.post('/api/callbacks', async (req, res) => {
   try {
     const callback = await callbackStore.create(req.body || {});
-    const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
-    if (crmConfigured) {
-      try {
-        const crmCallback = await createCallbackRecord(callback);
-        Object.assign(callback, await callbackStore.setCrmId(callback.id, crmCallback.id));
-        callback.crm = crmCallback;
-      } catch (error) {
-        console.warn('[CALLBACK_CRM_SYNC_FAILED]', error.message);
-      }
-    }
+    try { await syncNewCallbackToCrm(callback); }
+    catch (error) { console.warn('[CALLBACK_CRM_SYNC_FAILED]', error.message); }
     res.status(201).json({ callback });
   } catch (error) {
     res.status(400).json({ error: error.message });
