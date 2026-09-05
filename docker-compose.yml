@@ -44,6 +44,8 @@ services:
         condition: service_healthy
     networks:
       - estimate-network
+      # Join the shared `comms` network (jobber-postgres) for read-only call_events access.
+      - shadow_net
 
 volumes:
   postgres_data:
@@ -51,3 +53,5 @@ volumes:
 networks:
   estimate-network:
     driver: bridge
+  shadow_net:
+    external: true
