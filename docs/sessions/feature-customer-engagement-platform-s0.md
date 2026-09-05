@@ -292,6 +292,27 @@ An independent read-only comparison of all 36 provisional links against live HCP
 passed 36/36: normalized name matched and at least one normalized identity key matched for every
 link. No HCP, Chatwoot, or additional EspoCRM data was written by the review.
 
+## Expanded 100-Record HCP Contact Import
+
+Owner-approved and completed on 2026-09-05. A dedicated hard-capped endpoint processed candidates
+sequentially using the same create-only Contact and ExternalIdentityLink path; addresses remain out
+of scope for this import tier.
+
+Fresh verified backups preceded the run:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/hcp-import-100-prerun-20260905T002127Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/hcp-import-100-prerun-20260905T002132Z`
+
+The batch created 100 new Contacts and 100 provisional ExternalIdentityLinks. It safely skipped 37
+existing external-link matches, 2 provisional matches, and 1 field conflict. Post-run totals: 136
+Contacts, 136 links, 136 distinct linked Contacts, 136 Contact-linked local canary audit events, and
+0 duplicate source identity tuples. The legacy HcpCustomerLink projector remains unchanged at 1,416
+rows. The write gate was restored to `false` by cleanup.
+
+Independent redacted verification passed 136/136 provisional links against live HCP source records.
+The skipped field-conflict source remains untouched and should feed the next IdentityReview-creation
+hardening slice before any full import is approved.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
