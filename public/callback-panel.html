@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Schedule Callback</title>
-  <link rel="stylesheet" href="/callback-panel.css" />
+  <link rel="stylesheet" href="callback-panel.css" />
 </head>
 <body>
   <main class="panel">
@@ -13,15 +13,18 @@
     <a id="crmLink" class="crm-link" href="#" target="_blank" rel="noreferrer" hidden>Open CRM Contact</a>
     <section id="openCallbacks" hidden><h2>Open callbacks</h2><ul id="callbackList"></ul></section>
     <form id="form" hidden>
-      <label id="customerNameField" hidden>Customer name<input id="customerName" name="customerName" autocomplete="name" /></label>
-      <label>Owner<input id="owner" name="owner" required autocomplete="name" /></label>
+      <div id="customerNameField" class="name-fields" hidden>
+        <label>First name<input id="firstName" name="firstName" autocomplete="given-name" /></label>
+        <label>Last name<input id="lastName" name="lastName" autocomplete="family-name" /></label>
+      </div>
+      <p id="owner" class="owner" hidden></p>
       <label>Due date and time<input id="dueAt" name="dueAt" type="datetime-local" required /></label>
-      <label>Timezone<select id="timezone" name="timezone" required><option value="America/Los_Angeles">Pacific time</option><option value="America/Denver">Mountain time</option><option value="America/Chicago">Central time</option><option value="America/New_York">Eastern time</option></select></label>
+      <p class="timezone">Pacific time</p>
       <label>Reason<textarea id="reason" name="reason" rows="3" required placeholder="What needs to happen on this callback?"></textarea></label>
       <button id="submit" type="submit">Schedule callback</button>
     </form>
     <p id="message" class="message" role="status"></p>
   </main>
-  <script src="/callback-panel.js"></script>
+  <script src="callback-panel.js"></script>
 </body>
 </html>

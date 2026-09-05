@@ -8,10 +8,10 @@
 
 ## Delivered Workflow
 
-`/callback-panel.html?conversationId=<Chatwoot conversation ID>` is a portal-authenticated standalone
-panel. It re-fetches Chatwoot context on the server, requires an auto-confirmed CRM identity, shows
-the CRM Contact deep link and existing open callbacks, and collects only owner, due time, timezone,
-and reason.
+The native Chatwoot Dashboard App receives the selected conversation/contact and the logged-in
+Chatwoot agent through Chatwoot 4.17's `appContext` message. It re-fetches Chatwoot context on the
+server, requires an auto-confirmed CRM identity, shows the CRM Contact deep link and existing open
+callbacks, and uses the logged-in Chatwoot agent as owner. Timezone is fixed to Pacific time.
 
 Callback creation requires `ENGAGEMENT_CALLBACK_WRITES_ENABLED=true`. The panel submits a generated
 idempotency key; migration `039_callback_idempotency.sql` makes that key unique, and a repeated
@@ -46,3 +46,13 @@ Do not invent a customer callback merely to test the UI. When staff has a real c
 temporarily enable `ENGAGEMENT_CALLBACK_WRITES_ENABLED`, schedule that one callback from the panel,
 double-submit the exact same request only if a retry is needed, verify one local and one CRM Callback
 record plus `A_pending_callback`, then return the gate to `false`.
+
+## Dashboard App Delivery
+
+Nginx Proxy Manager host `26` on `10.0.50.10` is the public ingress for Chatwoot. Its same-domain
+HTTPS `/callback-panel/` route proxies to the gateway with a server-only shared header. Chatwoot
+Dashboard App `2`, titled `Schedule Callback`, is registered for account `1` using that route.
+
+The public panel route returns HTTP 200. A simulated official Chatwoot `appContext` for conversation
+`60` and agent `Test Agent` returned the confirmed Contact, CRM deep link, owner `Test Agent`, and
+fixed `America/Los_Angeles` timezone. Callback creation remains disabled.
