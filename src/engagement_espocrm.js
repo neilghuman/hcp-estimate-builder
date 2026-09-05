@@ -327,6 +327,27 @@ export async function updateIdentityReview(id, patch) {
   return put(`/IdentityReview/${encodeURIComponent(id)}`, patch);
 }
 
+async function del(pathname) {
+  const cfg = config();
+  if (!cfg.baseUrl || !cfg.writerApiKey) throw new EspoCrmError('ENGAGEMENT_ESPOCRM_WRITER_API_KEY is not configured.', 503);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
+  try {
+    const response = await fetch(`${cfg.baseUrl}/api/v1${pathname}`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json', 'X-Api-Key': cfg.writerApiKey, 'X-Requested-With': 'XMLHttpRequest' },
+      signal: ctrl.signal,
+    });
+    if (!response.ok && response.status !== 404) throw new EspoCrmError(`EspoCRM DELETE ${pathname} failed with HTTP ${response.status}.`, 502);
+    return true;
+  } catch (error) {
+    if (error instanceof EspoCrmError) throw error;
+    throw new EspoCrmError(error.name === 'AbortError' ? 'EspoCRM request timed out.' : `EspoCRM is unreachable: ${error.message}`, 504);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function createCallbackRecord(callback) {
   const body = {
     name: callback.callbackNumber,
@@ -384,6 +405,21 @@ export async function createMeetingRecord(meeting) {
   const created = await post('/Meeting', body);
   if (!created?.id) throw new EspoCrmError('EspoCRM Meeting create response did not include an ID.', 502);
   return { id: created.id, ...body };
+}
+
+export async function updateMeetingRecord(id, patch) {
+  const body = {
+    ...(patch?.status !== undefined ? { status: patch.status } : {}),
+    ...(patch?.dateStart !== undefined ? { dateStart: toEspoDateTime(patch.dateStart) } : {}),
+    ...(patch?.dateEnd !== undefined ? { dateEnd: toEspoDateTime(patch.dateEnd) } : {}),
+    ...(patch?.description !== undefined ? { description: patch.description } : {}),
+  };
+  const updated = await put(`/Meeting/${encodeURIComponent(id)}`, body);
+  return { id, ...body, ...(updated || {}) };
+}
+
+export async function deleteMeetingRecord(id) {
+  return del(`/Meeting/${encodeURIComponent(id)}`);
 }
 
 export async function updateCallbackRecord(id, patch) {

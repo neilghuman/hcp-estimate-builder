@@ -26,7 +26,7 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
 import { buildReminderNote, conversationIdFromSource, selectDueReminders } from './src/reminders.js';
@@ -173,6 +173,31 @@ async function syncCallbackMeeting(callback, customerName) {
   Object.assign(callback, await callbackStore.setMeetingId(callback.id, meeting.id));
   callback.meeting = meeting;
   return callback;
+}
+
+// Keeps the owner's calendar meeting in step with a callback's terminal status:
+// completed -> Held, cancelled -> delete. Best-effort, gated.
+async function syncMeetingForStatus(callback) {
+  if (!calendarSyncEnabled() || !callback?.crmMeetingId) return;
+  try {
+    if (callback.status === 'completed') await updateMeetingRecord(callback.crmMeetingId, { status: 'Held' });
+    else if (callback.status === 'cancelled') await deleteMeetingRecord(callback.crmMeetingId);
+  } catch (error) {
+    console.warn('[CALLBACK_MEETING_LIFECYCLE_FAILED]', callback.id, error.message);
+  }
+}
+
+// Moves the existing meeting to the rescheduled time and reassigns it to the
+// replacement callback. Best-effort, gated.
+async function syncMeetingForReschedule(previous, replacement) {
+  if (!calendarSyncEnabled() || !previous?.crmMeetingId) return;
+  try {
+    const end = new Date(new Date(replacement.dueAt).getTime() + 30 * 60 * 1000).toISOString();
+    await updateMeetingRecord(previous.crmMeetingId, { dateStart: replacement.dueAt, dateEnd: end });
+    Object.assign(replacement, await callbackStore.setMeetingId(replacement.id, previous.crmMeetingId));
+  } catch (error) {
+    console.warn('[CALLBACK_MEETING_RESCHEDULE_FAILED]', previous.id, error.message);
+  }
 }
 
 function remindersEnabled() {
@@ -507,6 +532,7 @@ app.patch('/api/callbacks/:id/status', async (req, res) => {
         console.warn('[CALLBACK_CRM_STATUS_FAILED]', error.message);
       }
     }
+    await syncMeetingForStatus(callback);
     res.json({ callback });
   } catch (error) {
     res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
@@ -525,6 +551,7 @@ app.patch('/api/callbacks/:id/complete', async (req, res) => {
         console.warn('[CALLBACK_CRM_COMPLETE_FAILED]', error.message);
       }
     }
+    await syncMeetingForStatus(callback);
     res.json({ callback });
   } catch (error) {
     res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
@@ -548,6 +575,7 @@ app.post('/api/callbacks/:id/reschedule', async (req, res) => {
         console.warn('[CALLBACK_CRM_RESCHEDULE_FAILED]', error.message);
       }
     }
+    await syncMeetingForReschedule(result.previous, result.replacement);
     res.status(201).json({ callback: result.replacement, rescheduled: result.previous });
   } catch (error) {
     res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
