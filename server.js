@@ -28,7 +28,8 @@ import { registerEngagementRoutes } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
 import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
-import { chatwootConfigured, getConversation, setConversationLabels } from './src/chatwoot.js';
+import { chatwootConfigured, getConversation, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
+import { buildReminderNote, conversationIdFromSource, selectDueReminders } from './src/reminders.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -172,6 +173,37 @@ async function syncCallbackMeeting(callback, customerName) {
   Object.assign(callback, await callbackStore.setMeetingId(callback.id, meeting.id));
   callback.meeting = meeting;
   return callback;
+}
+
+function remindersEnabled() {
+  return String(process.env.ENGAGEMENT_CALLBACK_REMINDERS_ENABLED || 'false').toLowerCase() === 'true';
+}
+
+function reminderLeadTimeMs() {
+  const minutes = Number(process.env.ENGAGEMENT_CALLBACK_REMINDER_LEAD_MIN || 15);
+  return Math.max(0, Number.isFinite(minutes) ? minutes : 15) * 60 * 1000;
+}
+
+// Posts an internal Chatwoot note for each due callback owner and marks it reminded
+// (idempotent via reminderSentAt). Gated; safe to run repeatedly. Returns a summary.
+async function sweepDueReminders(now = new Date()) {
+  if (!remindersEnabled() || !chatwootConfigured()) return { skipped: true, sent: 0, failed: 0 };
+  const due = selectDueReminders(await callbackStore.list(), now, reminderLeadTimeMs());
+  let sent = 0;
+  let failed = 0;
+  for (const callback of due) {
+    const conversationId = conversationIdFromSource(callback.source);
+    if (!conversationId) continue;
+    try {
+      await postPrivateNote(conversationId, buildReminderNote(callback));
+      await callbackStore.sendReminder(callback.id);
+      sent += 1;
+    } catch (error) {
+      failed += 1;
+      console.warn('[CALLBACK_REMINDER_FAILED]', callback.id, error.message);
+    }
+  }
+  return { skipped: false, considered: due.length, sent, failed };
 }
 
 async function confirmNewPanelCustomer(panel, { firstName, lastName } = {}) {
@@ -528,6 +560,16 @@ app.post('/api/callbacks/:id/remind', async (req, res) => {
     res.json(reminder);
   } catch (error) {
     res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
+  }
+});
+
+app.post('/api/callbacks/reminders/sweep', async (req, res) => {
+  try {
+    const now = req.body?.now ? new Date(String(req.body.now)) : new Date();
+    if (Number.isNaN(now.getTime())) return res.status(400).json({ error: 'A valid now timestamp is required.' });
+    res.json(await sweepDueReminders(now));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -1198,6 +1240,25 @@ app.listen(PORT, HOST, () => {
   if (USER && PASS) console.log('  Basic Auth: ENABLED');
   console.log('');
 });
+
+// Employee callback reminders: gated background sweep. Non-overlapping single tick.
+if (remindersEnabled() && chatwootConfigured()) {
+  const intervalMs = Math.max(15_000, Number(process.env.ENGAGEMENT_CALLBACK_REMINDER_POLL_MS || 60_000));
+  let sweeping = false;
+  setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const result = await sweepDueReminders();
+      if (result.sent || result.failed) console.log(`[CALLBACK_REMINDER_SWEEP] sent=${result.sent} failed=${result.failed}`);
+    } catch (error) {
+      console.warn('[CALLBACK_REMINDER_SWEEP_FAILED]', error.message);
+    } finally {
+      sweeping = false;
+    }
+  }, intervalMs).unref();
+  console.log(`  Callback reminders: ENABLED (every ${intervalMs}ms, lead ${reminderLeadTimeMs() / 60000}min)`);
+}
 
 // --- tiny .env loader --------------------------------------------------------
 function loadDotEnv(file) {

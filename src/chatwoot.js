@@ -189,6 +189,19 @@ export async function getConversationMessages(conversationId) {
   return (raw && (raw.payload || (raw.data && raw.data.payload))) || [];
 }
 
+// Post an internal-only private note (never delivered to the customer). Used for
+// employee-facing callback reminders on the conversation.
+export async function postPrivateNote(conversationId, content) {
+  const acc = requireAccount();
+  const text = String(content || '').trim();
+  if (!text) throw new ChatwootError('Cannot post an empty private note.', 400);
+  const data = await cwFetch(`/api/v1/accounts/${acc}/conversations/${Number(conversationId)}/messages`, {
+    method: 'POST',
+    body: { content: text, message_type: 'outgoing', private: true, content_attributes: { automation: 'callback-reminder' } },
+  });
+  return { id: data && (data.id ?? (data.data && data.data.id)) ? (data.id ?? data.data.id) : null, content: text };
+}
+
 // Replace a conversation's labels (Chatwoot's labels API sets the full list).
 export async function setConversationLabels(conversationId, labels) {
   const acc = requireAccount();
