@@ -162,17 +162,11 @@ export async function updateCanaryContactAddress(contactId, address) {
 }
 
 export async function findOpenIdentityReview({ sourceSystem, sourceAccountId, externalId }) {
-  const params = new URLSearchParams({
-    maxSize: '1',
-    where: JSON.stringify([
-      { type: 'equals', attribute: 'sourceSystem', value: sourceSystem },
-      { type: 'equals', attribute: 'sourceAccountId', value: sourceAccountId },
-      { type: 'equals', attribute: 'externalId', value: externalId },
-      { type: 'equals', attribute: 'reviewStatus', value: 'Open' },
-    ]),
-  });
-  const data = await get(`/IdentityReview?${params.toString()}`);
-  return data?.list?.[0] || null;
+  const data = await get('/IdentityReview?maxSize=200');
+  return (data?.list || []).find((review) => review.sourceSystem === sourceSystem
+    && review.sourceAccountId === sourceAccountId
+    && review.externalId === externalId
+    && review.reviewStatus === 'Open') || null;
 }
 
 export async function createIdentityReview(review) {
