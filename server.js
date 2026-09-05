@@ -24,6 +24,7 @@ import { registerIntakeRoutes, recoverInterruptedIntakes } from './src/intake.js
 import { registerDripRoutes } from './src/drip_routes.js';
 import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
+import { registerEngagementRoutes } from './src/engagement_routes.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -112,6 +113,10 @@ registerIntakeRoutes(app, pool);
 
 // Lead follow-up drip — enrollment + read/report API (sends gated/added in a later sprint).
 registerDripRoutes(app, pool);
+
+// Customer Engagement Platform - Sprint 0 identity resolver. Provider and CRM writes remain
+// disabled until the production write gate is separately approved.
+registerEngagementRoutes(app, pool);
 
 // Lead follow-up drip — background sweep. OFF unless DRIP_SWEEP_ENABLED (and sends need DRIP_SEND_ENABLED).
 if (String(process.env.DRIP_SWEEP_ENABLED ?? 'false').toLowerCase() === 'true') {
