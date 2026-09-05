@@ -29,7 +29,7 @@ import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbac
 import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
-import { buildReminderNote, conversationIdFromSource, selectDueReminders } from './src/reminders.js';
+import { buildReminderNote, conversationIdFromSource, selectReminderStages } from './src/reminders.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -220,6 +220,23 @@ async function syncMeetingForReschedule(previous, replacement) {
   }
 }
 
+// Removes the A_pending_callback label from the callback's conversation once no
+// open callback remains for it. Best-effort.
+async function clearPendingLabelIfResolved(callback) {
+  const conversationId = conversationIdFromSource(callback?.source);
+  if (!conversationId || !chatwootConfigured()) return;
+  const all = await callbackStore.list();
+  const stillOpen = activeCallbacks(all.filter((c) => conversationIdFromSource(c.source) === conversationId));
+  if (stillOpen.length) return;
+  try {
+    const conversation = await getConversation(conversationId);
+    const labels = labelTitles(conversation).filter((label) => label !== 'A_pending_callback');
+    await setConversationLabels(conversationId, labels);
+  } catch (error) {
+    console.warn('[CALLBACK_LABEL_CLEANUP_FAILED]', callback.id, error.message);
+  }
+}
+
 function remindersEnabled() {
   return String(process.env.ENGAGEMENT_CALLBACK_REMINDERS_ENABLED || 'false').toLowerCase() === 'true';
 }
@@ -229,26 +246,30 @@ function reminderLeadTimeMs() {
   return Math.max(0, Number.isFinite(minutes) ? minutes : 15) * 60 * 1000;
 }
 
-// Posts an internal Chatwoot note for each due callback owner and marks it reminded
-// (idempotent via reminderSentAt). Gated; safe to run repeatedly. Returns a summary.
+// Posts an internal Chatwoot note for each due reminder stage (lead + due) and
+// records the delivery in callback_reminders. Claim-first so overlapping sweeps
+// send each stage once. Gated; safe to run repeatedly. Returns a summary.
 async function sweepDueReminders(now = new Date()) {
   if (!remindersEnabled() || !chatwootConfigured()) return { skipped: true, sent: 0, failed: 0 };
-  const due = selectDueReminders(await callbackStore.list(), now, reminderLeadTimeMs());
+  const stages = selectReminderStages(await callbackStore.list(), now, reminderLeadTimeMs());
   let sent = 0;
   let failed = 0;
-  for (const callback of due) {
+  for (const { callback, stage } of stages) {
     const conversationId = conversationIdFromSource(callback.source);
     if (!conversationId) continue;
+    if (!(await callbackStore.claimReminderStage(callback.id, stage))) continue;
     try {
-      await postPrivateNote(conversationId, buildReminderNote(callback));
-      await callbackStore.sendReminder(callback.id);
+      await postPrivateNote(conversationId, buildReminderNote(callback, { stage }));
+      await callbackStore.markReminderStage(callback.id, stage, 'sent');
+      await callbackStore.markReminderSentOnce(callback.id);
       sent += 1;
     } catch (error) {
       failed += 1;
-      console.warn('[CALLBACK_REMINDER_FAILED]', callback.id, error.message);
+      await callbackStore.markReminderStage(callback.id, stage, 'failed', error.message).catch(() => {});
+      console.warn('[CALLBACK_REMINDER_FAILED]', callback.id, stage, error.message);
     }
   }
-  return { skipped: false, considered: due.length, sent, failed };
+  return { skipped: false, considered: stages.length, sent, failed };
 }
 
 async function confirmNewPanelCustomer(panel, { firstName, lastName } = {}) {
@@ -553,6 +574,7 @@ app.patch('/api/callbacks/:id/status', async (req, res) => {
       }
     }
     await syncMeetingForStatus(callback);
+    await clearPendingLabelIfResolved(callback);
     res.json({ callback });
   } catch (error) {
     res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
@@ -572,6 +594,7 @@ app.patch('/api/callbacks/:id/complete', async (req, res) => {
       }
     }
     await syncMeetingForStatus(callback);
+    await clearPendingLabelIfResolved(callback);
     res.json({ callback });
   } catch (error) {
     res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
