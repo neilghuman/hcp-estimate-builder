@@ -356,6 +356,35 @@ before sending any audit request. The audit flag was immediately restored to `fa
 changed. Final gateway state is `identityWritesEnabled=false` and
 `reconciliationEnabled=false`.
 
+## Resumable HCP Contact Import Runner
+
+The repeated fixed-cap endpoints are now superseded for broader import work by a durable runner.
+Migration `035_hcp_contact_import_runs.sql` creates `hcp_contact_import_runs` and
+`hcp_contact_import_batches`. A run has a fixed batch size of 1-50 and records each completed or
+failed batch. Before each batch, the runner reads all existing HCP ExternalIdentityLinks and
+excludes those source IDs before applying its safe `net_new` selector. It creates Contacts/links
+sequentially, records the local fingerprint-only decision event, and can resume from its run ID.
+
+The runner and migration were deployed after verified backups:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/resumable-import-runner-prerun-20260905T012715Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/resumable-import-runner-prerun-20260905T012720Z`
+
+The first approved runner batch used fresh pre-run backups at
+`resumable-import-first-batch-prerun-20260905T012758Z` (EspoCRM) and
+`resumable-import-first-batch-prerun-20260905T012803Z` (ScopeFoundry).
+
+- Run ID: `f3b5ec77-b45a-41d5-8153-b9e03eaca21a`; status `running`; batch size 25.
+- Batch 1: 25 Contact/link creates; 136 existing external links skipped; 14 reviewable outcomes
+	and 12 malformed/no-key outcomes recorded as skipped; no error.
+- Post-batch totals: 161 Contacts, 161 ExternalIdentityLinks, 161 distinct linked Contacts, and
+	0 duplicate source identities.
+- Both feature gates were restored to `false` after the batch.
+
+Before resuming this run, execute the corrected IdentityReview queue route again. It now excludes
+existing open review source IDs before applying its cap, allowing unqueued conflicts/collisions/
+provisional cases to advance instead of repeatedly selecting the first ten reviews.
+
 ## IdentityReview Queue Canary
 
 Owner-approved and completed on 2026-09-05. A fresh reconciliation found 2 `identity_review`, 6
