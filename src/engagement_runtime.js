@@ -440,13 +440,13 @@ export function buildReviewExecutionPlan(review, hcpCustomer) {
   throw Object.assign(new Error(`Unknown review decision: ${decision}.`), { status: 422 });
 }
 
-export async function recordReviewExecution(pool, { reviewId, contactId, decision }) {
+export async function recordReviewExecution(pool, { reviewId, contactId, decision, sourceSystem = 'housecall_pro' }) {
   await pool.query(`
     INSERT INTO integration_events (
       source_system, source_event_id, event_type, terminal_status, target_contact_id, correlation_id, processed_at
     ) VALUES ($1, $2, $3, 'processed', $4, $5, NOW())
     ON CONFLICT (source_system, source_event_id) DO NOTHING
-  `, ['housecall_pro', `review:${reviewId}`, `identity.review.${String(decision || 'unknown').toLowerCase()}`, contactId || null, crypto.randomUUID()]);
+  `, [sourceSystem, `review:${reviewId}`, `identity.review.${String(decision || 'unknown').toLowerCase()}`, contactId || null, crypto.randomUUID()]);
 }
 
 export async function createHcpImportRun(pool, batchSize) {

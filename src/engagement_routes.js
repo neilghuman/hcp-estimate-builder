@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, deriveBrandRelationships, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressBackfillCandidates, selectAddressWriteCanary, selectBrandBackfillCandidates, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { buildChatwootIdentityReview, buildConfirmedChatwootLinkPlan, buildChatwootWebhookDecision, resolveChatwootConversationContext } from './engagement_chatwoot.js';
+import { buildChatwootIdentityReview, buildChatwootReviewExecutionPlan, buildConfirmedChatwootLinkPlan, buildChatwootWebhookDecision, resolveChatwootConversationContext } from './engagement_chatwoot.js';
 import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, getIdentityQualitySnapshot, listContactsWithAddresses, listContactsWithBrands, listDecidedIdentityReviews, updateCanaryContactAddress, updateCanaryContactBrands, updateContactChatwootContext, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 import { chatwootConfigured, getConversation } from './chatwoot.js';
@@ -217,6 +217,42 @@ export function registerEngagementRoutes(app, pool) {
       const failed = [];
       for (const review of targets) {
         try {
+          if (review.sourceSystem === 'Chatwoot') {
+            const sourceAccountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
+            const conversationId = review.matchingEvidence?.conversationId;
+            if (!/^\d+$/.test(String(conversationId || ''))) throw Object.assign(new Error('Chatwoot review has no valid conversation context.'), { status: 422 });
+            if (!espocrmAddressWriterConfigured()) throw Object.assign(new Error('ENGAGEMENT_ESPOCRM_ADDRESS_WRITER_API_KEY is not configured.'), { status: 503 });
+            const conversation = await getConversation(conversationId);
+            const rawContactId = conversation?.meta?.sender?.id ?? conversation?.contact_id ?? conversation?.contact?.id;
+            const [chatwootContacts, existingLink] = await Promise.all([
+              listContactsForReconciliation(),
+              findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId, externalId: String(rawContactId || '') }),
+            ]);
+            const context = resolveChatwootConversationContext(conversation, { contacts: chatwootContacts, existingLink, defaultCountry: engagementConfig().defaultPhoneCountry });
+            const sourceUrl = `${String(process.env.CHAT_FOUNDRY_CHATWOOT_BASE_URL || '').replace(/\/$/, '')}/app/accounts/${sourceAccountId}/conversations/${context.conversationId}`;
+            const plan = buildChatwootReviewExecutionPlan(review, context, { sourceAccountId, sourceUrl, defaultCountry: engagementConfig().defaultPhoneCountry });
+            let contactId = plan.contactId || null;
+            let externalIdentityLinkId = null;
+            if (plan.action === 'link') {
+              if (!existingLink) {
+                const link = await createExternalIdentityLink(plan.link);
+                externalIdentityLinkId = link.id;
+              } else if (String(existingLink.contactId) === String(plan.contactId)) {
+                externalIdentityLinkId = existingLink.id;
+              } else {
+                throw Object.assign(new Error(`Chatwoot source identity is already linked to a different contact (${existingLink.contactId}).`), { status: 409 });
+              }
+            } else if (plan.action === 'create') {
+              const created = await createCanaryContactAndLink({ contact: plan.contact, link: plan.link, skipDuplicateCheck: true });
+              contactId = created.contactId;
+              externalIdentityLinkId = created.linkId;
+            }
+            if (plan.action !== 'defer') await updateContactChatwootContext(contactId, plan.contactContext);
+            await updateIdentityReview(review.id, { ...plan.reviewUpdate, decidedAt: new Date().toISOString() });
+            await recordReviewExecution(pool, { reviewId: review.id, contactId, decision: review.decision, sourceSystem: 'chatwoot' });
+            executed.push({ reviewId: review.id, action: plan.action, decision: review.decision, contactId, externalIdentityLinkId, sourceSystem: 'chatwoot' });
+            continue;
+          }
           const needsCustomer = ['CreateNew', 'Separate'].includes(review.decision);
           const hcpCustomer = needsCustomer ? await getCustomerForReconciliation(review.externalId) : null;
           const plan = buildReviewExecutionPlan(review, hcpCustomer);
