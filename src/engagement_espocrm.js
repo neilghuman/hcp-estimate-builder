@@ -127,9 +127,27 @@ export async function getContactForAddressAudit(contactId) {
   return get(`/Contact/${encodeURIComponent(contactId)}`);
 }
 
-export async function listProvisionalHcpIdentityLinks() {
-  const data = await get('/ExternalIdentityLink?maxSize=200');
-  return (data?.list || []).filter((link) => link.sourceSystem === 'HousecallPro' && link.linkStatus === 'Provisional');
+export async function listProvisionalHcpIdentityLinks({ pageSize = 200, maxPages = 100 } = {}) {
+  const links = [];
+  for (let offset = 0; offset < pageSize * maxPages; offset += pageSize) {
+    const data = await get(`/ExternalIdentityLink?maxSize=${pageSize}&offset=${offset}`);
+    const batch = Array.isArray(data?.list) ? data.list : [];
+    links.push(...batch.filter((link) => link.sourceSystem === 'HousecallPro' && link.linkStatus === 'Provisional'));
+    if (batch.length < pageSize) break;
+  }
+  return links;
+}
+
+export async function listContactsWithAddresses({ pageSize = 200, maxPages = 100 } = {}) {
+  const select = 'id,addressStreet,addressCity,addressState,addressPostalCode,addressCountry';
+  const contacts = [];
+  for (let offset = 0; offset < pageSize * maxPages; offset += pageSize) {
+    const data = await get(`/Contact?select=${encodeURIComponent(select)}&maxSize=${pageSize}&offset=${offset}`);
+    const batch = Array.isArray(data?.list) ? data.list : [];
+    contacts.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return contacts;
 }
 
 export async function listHcpIdentityLinks({ pageSize = 200, maxPages = 100 } = {}) {

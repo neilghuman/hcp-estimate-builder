@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, listDecidedIdentityReviews, updateCanaryContactAddress, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressBackfillCandidates, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
+import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, listContactsWithAddresses, listDecidedIdentityReviews, updateCanaryContactAddress, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
@@ -250,6 +250,34 @@ export function registerEngagementRoutes(app, pool) {
       return res.status(201).json({ canary: true, requestedLimit: batch.limit, updated, skipped: batch.skipped });
     } catch (error) {
       console.error('[ENGAGEMENT_ADDRESS_CANARY_FAILED]', { stage, message: error.message });
+      return res.status(error.status || 500).json({ error: error.message, stage });
+    }
+  });
+
+  app.post('/api/integrations/identity/canary/hcp-addresses-bulk', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    let stage = 'load_candidates';
+    try {
+      const [links, contacts] = await Promise.all([listProvisionalHcpIdentityLinks(), listContactsWithAddresses()]);
+      const byId = new Map(contacts.map((contact) => [String(contact.id), contact]));
+      const batch = selectAddressBackfillCandidates(links, byId, { limit: req.body?.limit, maxLimit: 200 });
+      const updated = [];
+      const skipped = { ...batch.skipped };
+      for (const candidate of batch.selected) {
+        stage = `addresses:${candidate.contactId}`;
+        const selection = selectPrimaryHcpAddress(await listCustomerAddresses(candidate.externalId));
+        if (!selection.address) { skipped[selection.status] = (skipped[selection.status] || 0) + 1; continue; }
+        stage = `update:${candidate.contactId}`;
+        const contact = await updateCanaryContactAddress(candidate.contactId, selection.address);
+        stage = `verify:${candidate.contactId}`;
+        if (compareContactAddress(contact, selection.address).status !== 'match') throw new Error(`Contact address read-back did not match for ${candidate.contactId}.`);
+        stage = `audit:${candidate.contactId}`;
+        await recordAddressProjection(pool, { contactId: candidate.contactId, linkId: candidate.linkId, addressId: selection.address.id });
+        updated.push({ contactId: candidate.contactId, linkId: candidate.linkId, addressType: selection.address.type, hcpAddressIdHash: fingerprint(selection.address.id) });
+      }
+      return res.status(201).json({ canary: true, requestedLimit: batch.limit, updated, skipped });
+    } catch (error) {
+      console.error('[ENGAGEMENT_ADDRESS_BULK_FAILED]', { stage, message: error.message });
       return res.status(error.status || 500).json({ error: error.message, stage });
     }
   });

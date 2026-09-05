@@ -248,6 +248,25 @@ export function selectAddressWriteCanary(rows, { limit = 10, maxLimit = 10 } = {
   return { selected, skipped, limit: cappedLimit };
 }
 
+export function isContactAddressBlank(contact) {
+  return !(contact?.addressStreet || contact?.addressCity || contact?.addressState || contact?.addressPostalCode || contact?.addressCountry);
+}
+
+export function selectAddressBackfillCandidates(links, contactsById, { limit = 100, maxLimit = 200 } = {}) {
+  const cap = Math.min(Math.max(Number(limit) || maxLimit, 1), maxLimit);
+  const selected = [];
+  const skipped = {};
+  const lookup = contactsById instanceof Map ? contactsById : new Map(Object.entries(contactsById || {}));
+  for (const link of links || []) {
+    if (selected.length >= cap) break;
+    const contact = lookup.get(String(link.contactId));
+    if (!contact) { skipped.contact_missing = (skipped.contact_missing || 0) + 1; continue; }
+    if (!isContactAddressBlank(contact)) { skipped.has_address = (skipped.has_address || 0) + 1; continue; }
+    selected.push({ contactId: String(link.contactId), linkId: String(link.id), externalId: String(link.externalId) });
+  }
+  return { selected, skipped, limit: cap };
+}
+
 export async function recordAddressProjection(pool, { contactId, linkId, addressId }) {
   const sourceEventId = `address-canary:${linkId}:${fingerprint(addressId)}`;
   await pool.query(`

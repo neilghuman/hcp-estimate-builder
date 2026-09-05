@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReviewExecutionPlan } from '../src/engagement_runtime.js';
+import { buildReviewExecutionPlan, isContactAddressBlank, selectAddressBackfillCandidates } from '../src/engagement_runtime.js';
 
 const SOURCE_ACCOUNT = 'hcp-production-shared';
 process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = SOURCE_ACCOUNT;
@@ -75,4 +75,32 @@ test('a review that is not Open or InReview is rejected', () => {
 
 test('an unknown decision is rejected', () => {
   assert.throws(() => buildReviewExecutionPlan({ ...baseReview, decision: 'Frobnicate' }), /Unknown review decision/);
+});
+
+test('isContactAddressBlank detects empty vs populated addresses', () => {
+  assert.equal(isContactAddressBlank({}), true);
+  assert.equal(isContactAddressBlank({ addressCity: 'Seattle' }), false);
+});
+
+test('address backfill selects only blank contacts, caps, and reports skips', () => {
+  const links = [
+    { id: 'l1', contactId: 'c1', externalId: 'cus_1' },
+    { id: 'l2', contactId: 'c2', externalId: 'cus_2' },
+    { id: 'l3', contactId: 'c3', externalId: 'cus_3' },
+    { id: 'l4', contactId: 'c4', externalId: 'cus_4' },
+  ];
+  const byId = new Map([
+    ['c1', { id: 'c1' }],
+    ['c2', { id: 'c2', addressStreet: '1 Main St' }],
+    ['c3', { id: 'c3' }],
+  ]);
+  const batch = selectAddressBackfillCandidates(links, byId, { limit: 1, maxLimit: 200 });
+  assert.equal(batch.selected.length, 1);
+  assert.equal(batch.selected[0].contactId, 'c1');
+  assert.equal(batch.limit, 1);
+
+  const all = selectAddressBackfillCandidates(links, byId, { maxLimit: 200 });
+  assert.deepEqual(all.selected.map((c) => c.contactId), ['c1', 'c3']);
+  assert.equal(all.skipped.has_address, 1);
+  assert.equal(all.skipped.contact_missing, 1);
 });
