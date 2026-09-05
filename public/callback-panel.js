@@ -51,6 +51,19 @@ async function load() {
   if (!data.callbackWritesEnabled) { const notice = document.querySelector('#identity'); notice.textContent = 'Callback scheduling is temporarily unavailable.'; notice.hidden = false; return; }
   form.hidden = false;
   const owner = document.querySelector('#owner'); owner.textContent = `Owner: ${data.owner}`; owner.hidden = false;
+  if (data.clickToCallEnabled && data.customer.phone) {
+    const callBtn = document.querySelector('#callBtn');
+    callBtn.hidden = false;
+    callBtn.onclick = async () => {
+      callBtn.disabled = true;
+      show(`Calling ${data.customer.phone} via 3CX...`);
+      try {
+        await request(apiPath(`/api/engagement/callback-panel/${conversationId}/call`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        show(`Call started to ${data.customer.phone}.`, 'success');
+      } catch (error) { show(error.message, 'error'); }
+      finally { callBtn.disabled = false; }
+    };
+  }
   if (data.callbacks.length) {
     document.querySelector('#openCallbacks').hidden = false;
     const list = document.querySelector('#callbackList');

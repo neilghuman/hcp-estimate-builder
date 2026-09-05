@@ -32,6 +32,7 @@ import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setCo
 import { buildReminderNote, conversationIdFromSource, selectReminderStages } from './src/reminders.js';
 import { buildCallActivity, selectCallLinks } from './src/callcorrelation.js';
 import { commsConfigured, findCallEventsForPhone } from './src/commsdb.js';
+import { clickToCallEnabled, makeCall } from './src/threecx.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -527,6 +528,7 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
       crmUrl: panel.crmUrl,
       callbacks: panel.callbacks,
       callbackWritesEnabled: callbackWritesEnabled(),
+      clickToCallEnabled: clickToCallEnabled(),
       owner: agent.name,
       timezone: 'America/Los_Angeles',
     });
@@ -574,6 +576,22 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
     res.status(result.replayed ? 200 : 201).json({ callback, replayed: result.replayed, crmUrl: callback.crmId && process.env.ENGAGEMENT_ESPOCRM_BASE_URL ? `${String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL).replace(/\/$/, '')}/#Callback/view/${callback.crmId}` : null });
   } catch (error) {
     res.status(error.status || 400).json({ error: error.message });
+  }
+});
+
+// Click-to-call: initiate a 3CX call to the conversation's customer. Gated.
+app.post('/api/engagement/callback-panel/:conversationId/call', async (req, res) => {
+  const conversationId = String(req.params.conversationId || '').trim();
+  if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+  if (!clickToCallEnabled()) return res.status(403).json({ error: 'Click-to-call is not enabled.' });
+  try {
+    const panel = await loadCallbackPanelContext(conversationId);
+    const phone = panel.context.contact.phone;
+    if (!phone) return res.status(422).json({ error: 'The customer has no phone number to call.' });
+    const result = await makeCall(phone);
+    res.json({ ok: true, destination: phone, result });
+  } catch (error) {
+    res.status(error.status || 502).json({ error: error.message });
   }
 });
 
