@@ -231,8 +231,8 @@ export function summarizeAddressAudit(rows) {
   return { counts, examples };
 }
 
-export function selectAddressWriteCanary(rows, { limit = 10 } = {}) {
-  const cappedLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+export function selectAddressWriteCanary(rows, { limit = 10, maxLimit = 10 } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || maxLimit, 1), maxLimit);
   const selected = [];
   const skipped = {};
   for (const row of rows || []) {

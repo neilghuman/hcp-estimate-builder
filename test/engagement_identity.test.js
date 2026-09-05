@@ -217,6 +217,18 @@ test('address write canary selects only blank unambiguous Contacts and caps at t
   assert.deepEqual(batch.skipped, { conflict: 1, ambiguous_multiple_service_addresses: 1 });
 });
 
+test('expanded address backfill selector permits at most twenty-five writes', () => {
+  const rows = Array.from({ length: 30 }, (_value, index) => ({
+    contactId: `crm-${index}`,
+    linkId: `link-${index}`,
+    contact: {},
+    addresses: [{ id: `adr-${index}`, type: 'billing', street: `${index} Main St`, city: 'Seattle', state: 'WA', zip: '98101' }],
+  }));
+  const batch = selectAddressWriteCanary(rows, { limit: 50, maxLimit: 25 });
+  assert.equal(batch.limit, 25);
+  assert.equal(batch.selected.length, 25);
+});
+
 test('IdentityReview selection is capped and excludes safe net-new and malformed outcomes', () => {
   const batch = selectIdentityReviewCandidates([
     { id: 'review', phone: '206-555-1212' },
