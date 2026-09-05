@@ -19,6 +19,18 @@ export function espocrmConfigured() {
   return Boolean(cfg.baseUrl && cfg.apiKey);
 }
 
+// EspoCRM datetime fields require "YYYY-MM-DD HH:MM:SS" (UTC), not ISO 8601.
+function toEspoDateTime(value) {
+  if (value === null || value === undefined || value === '') return value;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? value : value.toISOString().slice(0, 19).replace('T', ' ');
+  }
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? value : d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 async function get(pathname) {
   const cfg = config();
   if (!cfg.baseUrl || !cfg.apiKey) throw new EspoCrmError('ENGAGEMENT_ESPOCRM_BASE_URL or ENGAGEMENT_ESPOCRM_API_KEY is not configured.', 503);
@@ -320,7 +332,7 @@ export async function createCallbackRecord(callback) {
     name: callback.callbackNumber,
     contactId: callback.contactId || null,
     phone: callback.phone || null,
-    dueAt: callback.dueAt,
+    dueAt: toEspoDateTime(callback.dueAt),
     timezone: callback.timezone || null,
     callbackNumber: callback.callbackNumber || null,
     owner: callback.owner || null,
@@ -328,8 +340,8 @@ export async function createCallbackRecord(callback) {
     source: callback.source || null,
     status: callback.status || 'scheduled',
     outcome: callback.outcome || null,
-    reminderSentAt: callback.reminderSentAt || null,
-    completedAt: callback.completedAt || null,
+    reminderSentAt: toEspoDateTime(callback.reminderSentAt) || null,
+    completedAt: toEspoDateTime(callback.completedAt) || null,
     completedBy: callback.completedBy || null,
   };
   const created = await post('/Callback', body);
@@ -359,12 +371,12 @@ export async function updateCallbackRecord(id, patch) {
     ...(patch?.owner !== undefined ? { owner: patch.owner } : {}),
     ...(patch?.status !== undefined ? { status: patch.status } : {}),
     ...(patch?.outcome !== undefined ? { outcome: patch.outcome } : {}),
-    ...(patch?.dueAt !== undefined ? { dueAt: patch.dueAt } : {}),
+    ...(patch?.dueAt !== undefined ? { dueAt: toEspoDateTime(patch.dueAt) } : {}),
     ...(patch?.reason !== undefined ? { reason: patch.reason } : {}),
     ...(patch?.phone !== undefined ? { phone: patch.phone } : {}),
     ...(patch?.rescheduledToCallbackId !== undefined ? { rescheduledToCallbackId: patch.rescheduledToCallbackId } : {}),
     ...(patch?.rescheduledFromCallbackId !== undefined ? { rescheduledFromCallbackId: patch.rescheduledFromCallbackId } : {}),
-    ...(patch?.completedAt !== undefined ? { completedAt: patch.completedAt } : {}),
+    ...(patch?.completedAt !== undefined ? { completedAt: toEspoDateTime(patch.completedAt) } : {}),
     ...(patch?.completedBy !== undefined ? { completedBy: patch.completedBy } : {}),
   };
   const updated = await put(`/Callback/${encodeURIComponent(id)}`, body);
