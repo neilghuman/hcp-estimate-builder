@@ -32,6 +32,7 @@ import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setCo
 import { buildReminderNote, conversationIdFromSource, selectReminderStages } from './src/reminders.js';
 import { buildCallActivity, selectCallLinks } from './src/callcorrelation.js';
 import { commsConfigured, findCallEventsForPhone } from './src/commsdb.js';
+import { clickToCallEnabled, makeCall } from './src/threecx.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -143,6 +144,19 @@ async function syncNewCallbackToCrm(callback) {
 
 function calendarSyncEnabled() {
   return String(process.env.ENGAGEMENT_CALLBACK_CALENDAR_ENABLED || 'false').toLowerCase() === 'true';
+}
+
+// Maps a dashboard agent (name or id) to their 3CX extension for click-to-call
+// origination. JSON: { "<agent name or id>": "<extension>" }.
+function agentToExtension(agent) {
+  let map = {};
+  try { map = JSON.parse(process.env.ENGAGEMENT_CALLBACK_AGENT_EXTENSION_MAP || '{}'); }
+  catch (error) { console.warn('[CALLBACK_AGENT_EXTENSION_MAP_INVALID]', error.message); return null; }
+  if (!map || typeof map !== 'object') return null;
+  const name = String(agent?.name || '').trim();
+  const id = String(agent?.id || '').trim();
+  const hit = (name && map[name]) || (id && map[id]) || null;
+  return hit ? String(hit) : null;
 }
 
 // Explicit override map for owners whose Chatwoot email does not match their
@@ -527,6 +541,7 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
       crmUrl: panel.crmUrl,
       callbacks: panel.callbacks,
       callbackWritesEnabled: callbackWritesEnabled(),
+      clickToCallEnabled: clickToCallEnabled(),
       owner: agent.name,
       timezone: 'America/Los_Angeles',
     });
@@ -574,6 +589,24 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
     res.status(result.replayed ? 200 : 201).json({ callback, replayed: result.replayed, crmUrl: callback.crmId && process.env.ENGAGEMENT_ESPOCRM_BASE_URL ? `${String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL).replace(/\/$/, '')}/#Callback/view/${callback.crmId}` : null });
   } catch (error) {
     res.status(error.status || 400).json({ error: error.message });
+  }
+});
+
+// Click-to-call: initiate a 3CX call to the conversation's customer. Gated.
+// Originates from the agent's own 3CX extension when mapped, else the route point.
+app.post('/api/engagement/callback-panel/:conversationId/call', async (req, res) => {
+  const conversationId = String(req.params.conversationId || '').trim();
+  if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+  if (!clickToCallEnabled()) return res.status(403).json({ error: 'Click-to-call is not enabled.' });
+  try {
+    const panel = await loadCallbackPanelContext(conversationId);
+    const phone = panel.context.contact.phone;
+    if (!phone) return res.status(422).json({ error: 'The customer has no phone number to call.' });
+    const dn = agentToExtension(req.body?.agent) || undefined;
+    const result = await makeCall(phone, { dn });
+    res.json({ ok: true, destination: phone, from: dn || 'route-point', result });
+  } catch (error) {
+    res.status(error.status || 502).json({ error: error.message });
   }
 });
 
