@@ -1,7 +1,8 @@
 let conversationId = new URLSearchParams(location.search).get('conversationId');
 let currentAgent = null;
 let panelData = null;
-let activeTab = 'callback';
+const requestedTab = new URLSearchParams(location.search).get('tab') === 'task' ? 'task' : 'callback';
+let activeTab = requestedTab;
 const callbackForm = document.querySelector('#callbackForm');
 const taskForm = document.querySelector('#taskForm');
 const message = document.querySelector('#message');
@@ -67,7 +68,7 @@ async function load() {
   document.querySelector('#tabs').hidden = false;
   document.querySelector('[data-tab="callback"]').hidden = !data.callbackWritesEnabled;
   document.querySelector('[data-tab="task"]').hidden = !data.customerTasksEnabled;
-  activeTab = data.callbackWritesEnabled ? 'callback' : 'task';
+  activeTab = requestedTab === 'task' && data.customerTasksEnabled ? 'task' : (data.callbackWritesEnabled ? 'callback' : 'task');
   setTab(activeTab);
   const owner = document.querySelector('#owner'); owner.textContent = `Owner: ${data.owner}`; owner.hidden = false;
   const taskOwner = document.querySelector('#taskOwner'); taskOwner.textContent = `Owner: ${data.owner}`; taskOwner.hidden = false;
