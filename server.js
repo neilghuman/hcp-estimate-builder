@@ -24,7 +24,7 @@ import { registerIntakeRoutes, recoverInterruptedIntakes } from './src/intake.js
 import { registerDripRoutes } from './src/drip_routes.js';
 import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
-import { registerEngagementRoutes, sweepHcpLiveSync, hcpLiveSyncEnabled } from './src/engagement_routes.js';
+import { registerEngagementRoutes, sweepHcpLiveSync, hcpLiveSyncEnabled, sweepFuzzyDuplicates, fuzzyDedupEnabled } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
 import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
@@ -1456,6 +1456,27 @@ if (hcpLiveSyncEnabled()) {
     }
   }, intervalMs).unref();
   console.log(`  HCP live sync: ENABLED (every ${intervalMs}ms, batch ${Math.min(Math.max(Number(process.env.ENGAGEMENT_HCP_LIVE_SYNC_BATCH) || 25, 1), 50)})`);
+}
+
+// Fuzzy duplicate-contact sweep: gated periodic scan of EspoCRM Contacts -> IdentityReview.
+if (fuzzyDedupEnabled()) {
+  const intervalMs = Math.max(300_000, Number(process.env.ENGAGEMENT_FUZZY_DEDUP_POLL_MS || 86_400_000));
+  let sweeping = false;
+  setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const result = await sweepFuzzyDuplicates(pool);
+      if (result && !result.skipped && (result.created || result.failed)) {
+        console.log(`[FUZZY_DEDUP] scanned=${result.contactsScanned || 0} clusters=${result.clustersFound || 0} created=${result.created || 0} existing=${result.existing || 0} failed=${result.failed || 0}`);
+      }
+    } catch (error) {
+      console.warn('[FUZZY_DEDUP_FAILED]', error.message);
+    } finally {
+      sweeping = false;
+    }
+  }, intervalMs).unref();
+  console.log(`  Fuzzy dedup sweep: ENABLED (every ${intervalMs}ms)`);
 }
 
 // --- tiny .env loader --------------------------------------------------------
