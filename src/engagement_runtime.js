@@ -12,6 +12,7 @@ export function engagementConfig() {
     identityWritesEnabled: String(process.env.ENGAGEMENT_IDENTITY_WRITES_ENABLED || 'false').toLowerCase() === 'true',
     reconciliationEnabled: String(process.env.ENGAGEMENT_RECONCILIATION_ENABLED || 'false').toLowerCase() === 'true',
     chatwootWebhookEnabled: String(process.env.ENGAGEMENT_CHATWOOT_WEBHOOK_ENABLED || 'false').toLowerCase() === 'true',
+    hcpLiveSyncEnabled: String(process.env.ENGAGEMENT_HCP_LIVE_SYNC_ENABLED || 'false').toLowerCase() === 'true',
     defaultPhoneCountry: String(process.env.ENGAGEMENT_DEFAULT_PHONE_COUNTRY || 'US').toUpperCase(),
   };
 }

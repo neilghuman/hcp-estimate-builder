@@ -24,7 +24,7 @@ import { registerIntakeRoutes, recoverInterruptedIntakes } from './src/intake.js
 import { registerDripRoutes } from './src/drip_routes.js';
 import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
-import { registerEngagementRoutes } from './src/engagement_routes.js';
+import { registerEngagementRoutes, sweepHcpLiveSync, hcpLiveSyncEnabled } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
 import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
@@ -1435,6 +1435,27 @@ if (callSyncEnabled() && commsConfigured()) {
     }
   }, intervalMs).unref();
   console.log(`  Call correlation: ENABLED (every ${intervalMs}ms, lookback ${callSyncLookbackDays()}d)`);
+}
+
+// HCP -> EspoCRM live sync: gated incremental catch-up of new/changed customers.
+if (hcpLiveSyncEnabled()) {
+  const intervalMs = Math.max(60_000, Number(process.env.ENGAGEMENT_HCP_LIVE_SYNC_POLL_MS || 3_600_000));
+  let sweeping = false;
+  setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const result = await sweepHcpLiveSync(pool);
+      if (result && !result.skipped && (result.firstRun || result.created || result.queued || result.failed)) {
+        console.log(`[HCP_LIVE_SYNC] firstRun=${Boolean(result.firstRun)} created=${result.created || 0} queued=${result.queued || 0} failed=${result.failed || 0} cursor=${result.cursor || ''}`);
+      }
+    } catch (error) {
+      console.warn('[HCP_LIVE_SYNC_FAILED]', error.message);
+    } finally {
+      sweeping = false;
+    }
+  }, intervalMs).unref();
+  console.log(`  HCP live sync: ENABLED (every ${intervalMs}ms, batch ${Math.min(Math.max(Number(process.env.ENGAGEMENT_HCP_LIVE_SYNC_BATCH) || 25, 1), 50)})`);
 }
 
 // --- tiny .env loader --------------------------------------------------------
