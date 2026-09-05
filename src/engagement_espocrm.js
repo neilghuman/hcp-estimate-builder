@@ -303,3 +303,79 @@ async function put(pathname, body) {
 export async function updateIdentityReview(id, patch) {
   return put(`/IdentityReview/${encodeURIComponent(id)}`, patch);
 }
+
+export async function createCallbackRecord(callback) {
+  const body = {
+    name: callback.callbackNumber,
+    contactId: callback.contactId || null,
+    phone: callback.phone || null,
+    dueAt: callback.dueAt,
+    timezone: callback.timezone || null,
+    callbackNumber: callback.callbackNumber || null,
+    owner: callback.owner || null,
+    reason: callback.reason || null,
+    source: callback.source || null,
+    status: callback.status || 'scheduled',
+    outcome: callback.outcome || null,
+    reminderSentAt: callback.reminderSentAt || null,
+    completedAt: callback.completedAt || null,
+    completedBy: callback.completedBy || null,
+  };
+  const created = await post('/Callback', body);
+  if (!created?.id) throw new EspoCrmError('EspoCRM Callback create response did not include an ID.', 502);
+  return {
+    id: created.id,
+    contactId: created.contactId || body.contactId,
+    phone: created.phone || body.phone,
+    dueAt: created.dueAt || body.dueAt,
+    timezone: created.timezone || body.timezone,
+    callbackNumber: created.callbackNumber || body.callbackNumber,
+    owner: created.owner || body.owner,
+    reason: created.reason || body.reason,
+    source: created.source || body.source,
+    status: created.status || body.status,
+    outcome: created.outcome || body.outcome,
+    reminderSentAt: created.reminderSentAt || body.reminderSentAt,
+    rescheduledToCallbackId: created.rescheduledToCallbackId || body.rescheduledToCallbackId,
+    rescheduledFromCallbackId: created.rescheduledFromCallbackId || body.rescheduledFromCallbackId,
+    completedAt: created.completedAt || body.completedAt,
+    completedBy: created.completedBy || body.completedBy,
+  };
+}
+
+export async function updateCallbackRecord(id, patch) {
+  const body = {
+    ...(patch?.owner !== undefined ? { owner: patch.owner } : {}),
+    ...(patch?.status !== undefined ? { status: patch.status } : {}),
+    ...(patch?.outcome !== undefined ? { outcome: patch.outcome } : {}),
+    ...(patch?.dueAt !== undefined ? { dueAt: patch.dueAt } : {}),
+    ...(patch?.reason !== undefined ? { reason: patch.reason } : {}),
+    ...(patch?.phone !== undefined ? { phone: patch.phone } : {}),
+    ...(patch?.rescheduledToCallbackId !== undefined ? { rescheduledToCallbackId: patch.rescheduledToCallbackId } : {}),
+    ...(patch?.rescheduledFromCallbackId !== undefined ? { rescheduledFromCallbackId: patch.rescheduledFromCallbackId } : {}),
+    ...(patch?.completedAt !== undefined ? { completedAt: patch.completedAt } : {}),
+    ...(patch?.completedBy !== undefined ? { completedBy: patch.completedBy } : {}),
+  };
+  const updated = await put(`/Callback/${encodeURIComponent(id)}`, body);
+  return {
+    id,
+    ...body,
+    ...(updated || {}),
+  };
+}
+
+export async function listCallbackRecords() {
+  const data = await get('/Callback?maxSize=200');
+  return (data?.list || []).map((row) => ({
+    id: row.id,
+    contactId: row.contactId || null,
+    phone: row.phone || null,
+    dueAt: row.dueAt || null,
+    owner: row.owner || null,
+    reason: row.reason || null,
+    source: row.source || null,
+    status: row.status || 'scheduled',
+    outcome: row.outcome || null,
+    reminderSentAt: row.reminderSentAt || null,
+  }));
+}
