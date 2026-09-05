@@ -144,8 +144,8 @@ export function buildHcpCanaryProjection(customer) {
   };
 }
 
-export function selectHcpCanaryCandidates(customers, contacts, { limit = 10 } = {}) {
-  const cappedLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
+export function selectHcpCanaryCandidates(customers, contacts, { limit = 10, maxLimit = 10 } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || maxLimit, 1), maxLimit);
   const selected = [];
   const skipped = {};
   const candidates = Array.isArray(contacts) ? contacts.slice() : [];
