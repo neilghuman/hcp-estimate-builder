@@ -25,6 +25,8 @@ import { registerDripRoutes } from './src/drip_routes.js';
 import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes } from './src/engagement_routes.js';
+import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
+import { createCallbackRecord, updateCallbackRecord } from './src/engagement_espocrm.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.join(__dirname, '.env'));
@@ -85,6 +87,7 @@ const CUSTOMER_CACHE_TTL_MS = Number(process.env.CUSTOMER_CACHE_TTL_MS || 60_000
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 
+const callbackStore = createPersistedCallbackStore({ pool, table: 'callback_records' });
 const searchCache = new Map();
 const customerCache = new Map();
 
@@ -205,6 +208,168 @@ app.get('/api/customers/:id/estimates', async (req, res) => {
     res.json({ estimates });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+app.get('/api/callbacks', async (req, res) => {
+  try {
+    const owner = req.query.owner ? String(req.query.owner).trim() : null;
+    const queue = owner ? await callbackStore.listByOwner(owner) : await callbackStore.list();
+    res.json({ queue });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/callbacks/queue', async (_req, res) => {
+  try {
+    const queue = await callbackStore.listScheduled();
+    res.json({ queue });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/callbacks/due', async (req, res) => {
+  try {
+    const now = req.query.now ? new Date(String(req.query.now)) : new Date();
+    const due = await callbackStore.listDue(now);
+    res.json({ due });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/callbacks/command-center', async (req, res) => {
+  try {
+    const now = req.query.now ? new Date(String(req.query.now)) : new Date();
+    if (Number.isNaN(now.getTime())) return res.status(400).json({ error: 'A valid now timestamp is required.' });
+    res.json(buildCallbackCommandCenter(await callbackStore.list(), now));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/callbacks/owners/:owner', async (req, res) => {
+  try {
+    const owner = String(req.params.owner || '').trim();
+    res.json({ queue: await callbackStore.listByOwner(owner) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/callbacks/:id', async (req, res) => {
+  try {
+    const callback = await callbackStore.get(req.params.id);
+    if (!callback) return res.status(404).json({ error: 'Callback not found.' });
+    res.json({ callback });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/callbacks', async (req, res) => {
+  try {
+    const callback = await callbackStore.create(req.body || {});
+    const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+    if (crmConfigured) {
+      try {
+        const crmCallback = await createCallbackRecord(callback);
+        Object.assign(callback, await callbackStore.setCrmId(callback.id, crmCallback.id));
+        callback.crm = crmCallback;
+      } catch (error) {
+        console.warn('[CALLBACK_CRM_SYNC_FAILED]', error.message);
+      }
+    }
+    res.status(201).json({ callback });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.patch('/api/callbacks/:id/assign', async (req, res) => {
+  try {
+    const owner = String(req.body?.owner ?? '').trim();
+    const callback = await callbackStore.assign(req.params.id, owner || null);
+    const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+    if (crmConfigured && callback.crmId) {
+      try {
+        callback.crm = await updateCallbackRecord(callback.crmId, { owner: callback.owner });
+      } catch (error) {
+        console.warn('[CALLBACK_CRM_ASSIGN_FAILED]', error.message);
+      }
+    }
+    res.json({ callback });
+  } catch (error) {
+    res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
+  }
+});
+
+app.patch('/api/callbacks/:id/status', async (req, res) => {
+  try {
+    const callback = await callbackStore.updateStatus(req.params.id, String(req.body?.status || ''));
+    const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+    if (crmConfigured && callback.crmId) {
+      try {
+        callback.crm = await updateCallbackRecord(callback.crmId, { status: callback.status });
+      } catch (error) {
+        console.warn('[CALLBACK_CRM_STATUS_FAILED]', error.message);
+      }
+    }
+    res.json({ callback });
+  } catch (error) {
+    res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
+  }
+});
+
+app.patch('/api/callbacks/:id/complete', async (req, res) => {
+  try {
+    const outcome = String(req.body?.outcome ?? 'resolved').trim() || 'resolved';
+    const callback = await callbackStore.complete(req.params.id, outcome);
+    const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+    if (crmConfigured && callback.crmId) {
+      try {
+        callback.crm = await updateCallbackRecord(callback.crmId, { status: callback.status, outcome: callback.outcome });
+      } catch (error) {
+        console.warn('[CALLBACK_CRM_COMPLETE_FAILED]', error.message);
+      }
+    }
+    res.json({ callback });
+  } catch (error) {
+    res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
+  }
+});
+
+app.post('/api/callbacks/:id/reschedule', async (req, res) => {
+  try {
+    const result = await callbackStore.reschedule(req.params.id, req.body || {});
+    const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+    if (crmConfigured) {
+      try {
+        const crmReplacement = await createCallbackRecord(result.replacement);
+        result.replacement.crm = crmReplacement;
+        Object.assign(result.replacement, await callbackStore.setCrmId(result.replacement.id, crmReplacement.id));
+        if (result.previous.crmId) {
+          result.previous.crm = await updateCallbackRecord(result.previous.crmId, { status: result.previous.status, rescheduledToCallbackId: crmReplacement.id });
+          result.replacement.crm = await updateCallbackRecord(crmReplacement.id, { rescheduledFromCallbackId: result.previous.crmId });
+        }
+      } catch (error) {
+        console.warn('[CALLBACK_CRM_RESCHEDULE_FAILED]', error.message);
+      }
+    }
+    res.status(201).json({ callback: result.replacement, rescheduled: result.previous });
+  } catch (error) {
+    res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
+  }
+});
+
+app.post('/api/callbacks/:id/remind', async (req, res) => {
+  try {
+    const reminder = await callbackStore.sendReminder(req.params.id);
+    res.json(reminder);
+  } catch (error) {
+    res.status(error.message.includes('not found') ? 404 : 400).json({ error: error.message });
   }
 });
 
