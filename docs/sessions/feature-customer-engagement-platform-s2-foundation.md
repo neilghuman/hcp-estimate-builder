@@ -45,6 +45,18 @@ No Contact, External Identity Link, Callback, Chatwoot label, Chatwoot custom at
 customer message was created by this canary. `ENGAGEMENT_IDENTITY_WRITES_ENABLED` was restored to
 `false` immediately after the test and remains off.
 
+## User-Approved Review Resolution
+
+The operator selected `Neil Ghuman Ghuman` as the candidate Contact and saved
+`LinkExisting` for IdentityReview `6a9bb9da0c55daa73`. The guarded executor ran only that
+review and created External Identity Link `6a9bbdf9d90858471`.
+
+Read-back verification confirms the review is `Linked`, its decision remains `LinkExisting`, and
+the identity link is `Chatwoot` / account `1` / external Contact `1` / `Confirmed`, targeting
+EspoCRM Contact `6a9b52995711cc7a5`. That Contact now has the Chatwoot account ID, Contact ID,
+and conversation deep link. The gateway remained healthy and the identity-write gate was restored
+to `false` immediately after the single review execution.
+
 ## Webhook Delivery Canary
 
 The receiver was enabled with a generated server-only URL secret and registered as Chatwoot
