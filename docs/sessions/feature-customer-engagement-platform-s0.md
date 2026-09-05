@@ -251,6 +251,26 @@ The final read-only audit reports 10 `match`, 1 `ambiguous_multiple_service_addr
 other outcome. Final gateway state: `identityWritesEnabled=false` and
 `reconciliationEnabled=false`.
 
+## Billing-First Address Policy
+
+Owner decision: the EspoCRM Contact's one native address is the HCP billing address when exactly
+one billing address exists. Additional HCP service addresses are deliberately omitted from Contact
+projection and remain HCP-owned until a dedicated Service Location model exists. If no billing
+address exists, a sole service address is the fallback. Multiple billing addresses remain an
+address-review exception; service-address count does not override a sole billing address.
+
+The policy was implemented and validated locally (237/237 full tests), then deployed with write
+gates disabled. A read-only audit changed the one previously ambiguous multi-service record into
+one blank, unambiguous billing candidate. Fresh verified backups preceded its single update:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/billing-first-address-prerun-20260905T001349Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/billing-first-address-prerun-20260905T001354Z`
+
+The final controlled address update created one billing-address match and skipped the ten existing
+matches. Final read-only verification: 11 total, 11 `match`, 0 blank, 0 conflicts, and 0 address
+ambiguities. All 11 Contacts now have one verified native EspoCRM address; no additional HCP
+service address was projected. Both feature gates are disabled.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
