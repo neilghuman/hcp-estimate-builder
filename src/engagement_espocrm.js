@@ -366,6 +366,26 @@ export async function createCallbackRecord(callback) {
   };
 }
 
+export async function createMeetingRecord(meeting) {
+  const start = meeting.dateStart;
+  const end = meeting.dateEnd || new Date(new Date(start).getTime() + 30 * 60 * 1000).toISOString();
+  const assignedUserId = meeting.assignedUserId || null;
+  const body = {
+    name: meeting.name,
+    status: meeting.status || 'Planned',
+    dateStart: toEspoDateTime(start),
+    dateEnd: toEspoDateTime(end),
+    assignedUserId,
+    usersIds: meeting.usersIds || (assignedUserId ? [assignedUserId] : []),
+    parentType: meeting.parentType || null,
+    parentId: meeting.parentId || null,
+    description: meeting.description || null,
+  };
+  const created = await post('/Meeting', body);
+  if (!created?.id) throw new EspoCrmError('EspoCRM Meeting create response did not include an ID.', 502);
+  return { id: created.id, ...body };
+}
+
 export async function updateCallbackRecord(id, patch) {
   const body = {
     ...(patch?.owner !== undefined ? { owner: patch.owner } : {}),

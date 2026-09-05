@@ -26,7 +26,7 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, createCanaryContactAndLink, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, setConversationLabels } from './src/chatwoot.js';
 // Load .env (tiny loader; avoids an extra dependency).
@@ -135,6 +135,42 @@ async function syncNewCallbackToCrm(callback) {
   const crmCallback = await createCallbackRecord(callback);
   Object.assign(callback, await callbackStore.setCrmId(callback.id, crmCallback.id));
   callback.crm = crmCallback;
+  return callback;
+}
+
+function calendarSyncEnabled() {
+  return String(process.env.ENGAGEMENT_CALLBACK_CALENDAR_ENABLED || 'false').toLowerCase() === 'true';
+}
+
+// Maps a callback owner (Chatwoot agent name) to an EspoCRM User id, so the
+// owner's Outlook calendar receives the meeting. JSON: { "<owner name>": "<userId>" }.
+function ownerToEspoUserId(owner) {
+  const key = String(owner || '').trim();
+  if (!key) return null;
+  let map = {};
+  try { map = JSON.parse(process.env.ENGAGEMENT_CALLBACK_OWNER_USER_MAP || '{}'); }
+  catch (error) { console.warn('[CALLBACK_OWNER_USER_MAP_INVALID]', error.message); return null; }
+  return (map && typeof map === 'object' && map[key]) ? String(map[key]) : null;
+}
+
+// Creates an EspoCRM Meeting for the callback so it appears on the owner's
+// (Outlook-synced) calendar. Best-effort and idempotent per callback.
+async function syncCallbackMeeting(callback, customerName) {
+  if (!calendarSyncEnabled() || callback.crmMeetingId) return callback;
+  const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
+  if (!crmConfigured) return callback;
+  const assignedUserId = ownerToEspoUserId(callback.owner);
+  if (!assignedUserId) return callback;
+  const meeting = await createMeetingRecord({
+    name: `Callback: ${customerName || callback.phone || 'customer'}`,
+    dateStart: callback.dueAt,
+    assignedUserId,
+    parentType: callback.contactId ? 'Contact' : null,
+    parentId: callback.contactId || null,
+    description: [callback.callbackNumber, callback.reason, callback.phone].filter(Boolean).join(' — '),
+  });
+  Object.assign(callback, await callbackStore.setMeetingId(callback.id, meeting.id));
+  callback.meeting = meeting;
   return callback;
 }
 
@@ -387,6 +423,11 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
       await setConversationLabels(panel.context.conversationId, Array.from(new Set([...labelTitles(panel.conversation), 'A_pending_callback'])));
     } catch (error) {
       console.warn('[CALLBACK_PANEL_LABEL_SYNC_FAILED]', error.message);
+    }
+    try {
+      await syncCallbackMeeting(callback, panel.context.contact.name);
+    } catch (error) {
+      console.warn('[CALLBACK_PANEL_MEETING_SYNC_FAILED]', error.message);
     }
     res.status(result.replayed ? 200 : 201).json({ callback, replayed: result.replayed, crmUrl: callback.crmId && process.env.ENGAGEMENT_ESPOCRM_BASE_URL ? `${String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL).replace(/\/$/, '')}/#Callback/view/${callback.crmId}` : null });
   } catch (error) {
