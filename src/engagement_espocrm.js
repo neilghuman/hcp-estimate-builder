@@ -262,17 +262,28 @@ export async function createExternalIdentityLink(link) {
   return created;
 }
 
-export async function findExternalIdentityLinkByExternalId({ sourceSystem, externalId }) {
+export async function findExternalIdentityLinkByExternalId({ sourceSystem, sourceAccountId = null, externalId }) {
   const params = new URLSearchParams();
   params.set('where[0][type]', 'equals');
   params.set('where[0][attribute]', 'externalId');
   params.set('where[0][value]', String(externalId));
   const data = await get(`/ExternalIdentityLink?${params.toString()}`);
-  return (data?.list || []).find((link) => link.sourceSystem === sourceSystem) || null;
+  return (data?.list || []).find((link) => link.sourceSystem === sourceSystem
+    && (!sourceAccountId || link.sourceAccountId === sourceAccountId)) || null;
 }
 
 export async function updateExternalIdentityLink(id, patch) {
   return put(`/ExternalIdentityLink/${encodeURIComponent(id)}`, patch);
+}
+
+export async function updateContactChatwootContext(contactId, context) {
+  const body = {
+    chatwootAccountId: String(context.chatwootAccountId || '').trim() || null,
+    chatwootContactId: String(context.chatwootContactId || '').trim() || null,
+    chatwootUrl: String(context.chatwootUrl || '').trim() || null,
+  };
+  await putAddress(contactId, body);
+  return getContactForAddressAudit(contactId);
 }
 
 async function put(pathname, body) {

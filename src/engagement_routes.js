@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, deriveBrandRelationships, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressBackfillCandidates, selectAddressWriteCanary, selectBrandBackfillCandidates, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, getIdentityQualitySnapshot, listContactsWithAddresses, listContactsWithBrands, listDecidedIdentityReviews, updateCanaryContactAddress, updateCanaryContactBrands, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { buildChatwootIdentityReview, buildConfirmedChatwootLinkPlan, buildChatwootWebhookDecision, resolveChatwootConversationContext } from './engagement_chatwoot.js';
+import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, getIdentityQualitySnapshot, listContactsWithAddresses, listContactsWithBrands, listDecidedIdentityReviews, updateCanaryContactAddress, updateCanaryContactBrands, updateContactChatwootContext, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
+import { chatwootConfigured, getConversation } from './chatwoot.js';
 
 function credentialsMatch(actual, expected) {
   const left = Buffer.from(String(actual || ''));
@@ -12,7 +14,7 @@ function credentialsMatch(actual, expected) {
 export function registerEngagementRoutes(app, pool) {
   app.get('/api/integrations/identity/config', (_req, res) => {
     const config = engagementConfig();
-    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), espocrmAddressWriterConfigured: espocrmAddressWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
+    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, chatwootWebhookEnabled: config.chatwootWebhookEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), espocrmAddressWriterConfigured: espocrmAddressWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
   });
 
   const requireIntegrationAuth = (req, res, next) => {
@@ -20,6 +22,123 @@ export function registerEngagementRoutes(app, pool) {
     if (!credentialsMatch(req.get('x-engagement-api-key'), process.env.ENGAGEMENT_API_KEY)) return res.status(401).json({ error: 'Integration authentication failed.' });
     return next();
   };
+
+  app.get('/api/integrations/chatwoot/conversations/:conversationId/context', requireIntegrationAuth, async (req, res) => {
+    if (!chatwootConfigured()) return res.status(503).json({ error: 'Chatwoot is not configured.' });
+    const conversationId = String(req.params.conversationId || '').trim();
+    if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+    try {
+      const conversation = await getConversation(conversationId);
+      const rawContactId = conversation?.meta?.sender?.id ?? conversation?.contact_id ?? conversation?.contact?.id;
+      if (!rawContactId) return res.status(422).json({ error: 'The Chatwoot conversation has no customer contact.' });
+      const [contacts, existingLink] = await Promise.all([
+        listContactsForReconciliation(),
+        findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId: process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID, externalId: String(rawContactId) }),
+      ]);
+      const context = resolveChatwootConversationContext(conversation, {
+        contacts,
+        existingLink,
+        defaultCountry: engagementConfig().defaultPhoneCountry,
+      });
+      const crmBaseUrl = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
+      return res.json({ ...context, crmUrl: context.identity.contactId && crmBaseUrl ? `${crmBaseUrl}/#Contact/view/${context.identity.contactId}` : null });
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/integrations/chatwoot/conversations/:conversationId/review', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    if (!chatwootConfigured()) return res.status(503).json({ error: 'Chatwoot is not configured.' });
+    const conversationId = String(req.params.conversationId || '').trim();
+    if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+    try {
+      const conversation = await getConversation(conversationId);
+      const rawContactId = conversation?.meta?.sender?.id ?? conversation?.contact_id ?? conversation?.contact?.id;
+      if (!rawContactId) return res.status(422).json({ error: 'The Chatwoot conversation has no customer contact.' });
+      const sourceAccountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
+      const [contacts, existingLink] = await Promise.all([
+        listContactsForReconciliation(),
+        findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId, externalId: String(rawContactId) }),
+      ]);
+      const context = resolveChatwootConversationContext(conversation, { contacts, existingLink, defaultCountry: engagementConfig().defaultPhoneCountry });
+      const sourceUrl = `${String(process.env.CHAT_FOUNDRY_CHATWOOT_BASE_URL || '').replace(/\/$/, '')}/app/accounts/${sourceAccountId}/conversations/${context.conversationId}`;
+      const review = buildChatwootIdentityReview(context, { sourceAccountId, sourceUrl });
+      const existingReview = await findOpenIdentityReview(review);
+      if (existingReview) return res.json({ created: false, identityReviewId: existingReview.id, identity: context.identity });
+      const created = await createIdentityReview(review);
+      return res.status(201).json({ created: true, identityReviewId: created.id, identity: context.identity });
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/integrations/chatwoot/webhooks/:secret', async (req, res) => {
+    const expectedSecret = String(process.env.ENGAGEMENT_CHATWOOT_WEBHOOK_SECRET || '');
+    const suppliedSecret = String(req.params.secret || '');
+    if (!expectedSecret || !credentialsMatch(suppliedSecret, expectedSecret)) return res.status(401).json({ error: 'Webhook authentication failed.' });
+    if (!engagementConfig().chatwootWebhookEnabled) return res.status(403).json({ error: 'ENGAGEMENT_CHATWOOT_WEBHOOK_ENABLED is off.' });
+    if (!chatwootConfigured()) return res.status(503).json({ error: 'Chatwoot is not configured.' });
+    try {
+      const webhook = buildChatwootWebhookDecision(req.body);
+      if (webhook.event !== 'message_created' || !webhook.isIncoming) return res.status(202).json({ ignored: true, event: webhook.event });
+      const conversation = await getConversation(webhook.conversationId);
+      const rawContactId = conversation?.meta?.sender?.id ?? conversation?.contact_id ?? conversation?.contact?.id;
+      if (!rawContactId) return res.status(422).json({ error: 'The Chatwoot conversation has no customer contact.' });
+      const [contacts, existingLink] = await Promise.all([
+        listContactsForReconciliation(),
+        findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId: process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID, externalId: String(rawContactId) }),
+      ]);
+      const context = resolveChatwootConversationContext(conversation, {
+        contacts,
+        existingLink,
+        defaultCountry: engagementConfig().defaultPhoneCountry,
+      });
+      const ledger = await recordDryRunDecision(pool, buildDryRunDecision({
+        sourceSystem: 'chatwoot',
+        sourceEventId: webhook.sourceEventId,
+        eventType: 'identity.chatwoot_webhook',
+        record: context.contact,
+        contacts,
+        existingLink,
+      }));
+      return res.status(ledger.replayed ? 200 : 202).json({ accepted: true, replayed: ledger.replayed, conversationId: context.conversationId, identity: context.identity });
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/integrations/chatwoot/conversations/:conversationId/link', requireIntegrationAuth, async (req, res) => {
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    if (!chatwootConfigured()) return res.status(503).json({ error: 'Chatwoot is not configured.' });
+    if (!espocrmAddressWriterConfigured()) return res.status(503).json({ error: 'ENGAGEMENT_ESPOCRM_ADDRESS_WRITER_API_KEY is not configured.' });
+    const conversationId = String(req.params.conversationId || '').trim();
+    if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+    try {
+      const conversation = await getConversation(conversationId);
+      const rawContactId = conversation?.meta?.sender?.id ?? conversation?.contact_id ?? conversation?.contact?.id;
+      if (!rawContactId) return res.status(422).json({ error: 'The Chatwoot conversation has no customer contact.' });
+      const sourceAccountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
+      const [contacts, existingLink] = await Promise.all([
+        listContactsForReconciliation(),
+        findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId, externalId: String(rawContactId) }),
+      ]);
+      const context = resolveChatwootConversationContext(conversation, {
+        contacts,
+        existingLink,
+        defaultCountry: engagementConfig().defaultPhoneCountry,
+      });
+      const plan = buildConfirmedChatwootLinkPlan(context, { sourceAccountId });
+      plan.contactContext.chatwootUrl = `${String(process.env.CHAT_FOUNDRY_CHATWOOT_BASE_URL || '').replace(/\/$/, '')}/app/accounts/${sourceAccountId}/conversations/${context.conversationId}`;
+      let link = existingLink;
+      if (!link) link = await createExternalIdentityLink({ ...plan.link, contactId: plan.contactId });
+      if (String(link.contactId) !== plan.contactId) return res.status(409).json({ error: 'The Chatwoot source identity is already linked to another CRM Contact.' });
+      const contact = await updateContactChatwootContext(plan.contactId, plan.contactContext);
+      return res.status(201).json({ linked: true, contactId: plan.contactId, externalIdentityLinkId: link.id, chatwootUrl: plan.contactContext.chatwootUrl, contact });
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message });
+    }
+  });
 
   app.get('/api/integrations/espocrm/inventory', requireIntegrationAuth, async (_req, res) => {
     try { return res.json(await getEspoCrmInventory()); }
