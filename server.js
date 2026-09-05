@@ -26,7 +26,7 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCanaryContactAndLink, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, setConversationLabels } from './src/chatwoot.js';
 // Load .env (tiny loader; avoids an extra dependency).
@@ -128,6 +128,20 @@ async function syncNewCallbackToCrm(callback) {
   Object.assign(callback, await callbackStore.setCrmId(callback.id, crmCallback.id));
   callback.crm = crmCallback;
   return callback;
+}
+
+async function confirmNewPanelCustomer(panel, customerName) {
+  const nameParts = String(customerName || '').trim().split(/\s+/).filter(Boolean);
+  if (!nameParts.length) throw Object.assign(new Error('Customer name is required for a new customer.'), { status: 422 });
+  const sourceAccountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
+  const created = await createCanaryContactAndLink({
+    contact: { firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || 'Customer', phoneNumber: panel.context.contact.phone, emailAddress: panel.context.contact.email },
+    link: { name: `Chatwoot:${sourceAccountId}:${panel.context.contact.id}`, sourceSystem: 'Chatwoot', sourceAccountId, externalId: panel.context.contact.id, linkStatus: 'Confirmed', matchingEvidence: { source: 'callback-panel-new-customer', conversationId: panel.context.conversationId } },
+    skipDuplicateCheck: true,
+  });
+  const chatwootUrl = `${String(process.env.CHAT_FOUNDRY_CHATWOOT_BASE_URL || '').replace(/\/$/, '')}/app/accounts/${sourceAccountId}/conversations/${panel.context.conversationId}`;
+  await updateContactChatwootContext(created.contactId, { chatwootAccountId: sourceAccountId, chatwootContactId: panel.context.contact.id, chatwootUrl });
+  return { contactId: created.contactId, chatwootUrl };
 }
 
 // Optional HTTP Basic Auth gate.
@@ -334,11 +348,14 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
   if (!callbackWritesEnabled()) return res.status(403).json({ error: 'ENGAGEMENT_CALLBACK_WRITES_ENABLED is off.' });
   try {
     const panel = await loadCallbackPanelContext(conversationId);
-    if (panel.context.identity.outcome !== 'auto_confirmed' || !panel.context.identity.contactId) {
+    let contactId = panel.context.identity.contactId;
+    if (panel.context.identity.outcome === 'net_new') {
+      contactId = (await confirmNewPanelCustomer(panel, req.body?.customerName)).contactId;
+    } else if (panel.context.identity.outcome !== 'auto_confirmed' || !contactId) {
       return res.status(409).json({ error: 'Confirm the CRM customer before scheduling a callback.', identity: panel.context.identity });
     }
     const result = await callbackStore.createOnce({
-      contactId: String(panel.context.identity.contactId),
+      contactId: String(contactId),
       phone: panel.context.contact.phone,
       dueAt: req.body?.dueAt,
       timezone: req.body?.timezone,

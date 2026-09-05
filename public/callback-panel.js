@@ -22,7 +22,10 @@ async function load() {
   const data = await request(`/api/engagement/callback-panel/${conversationId}`);
   document.querySelector('#customer').textContent = [data.customer.name, data.customer.phone, data.customer.email].filter(Boolean).join(' | ') || 'Unnamed customer';
   if (data.crmUrl) { const link = document.querySelector('#crmLink'); link.href = data.crmUrl; link.hidden = false; }
-  if (data.identity.outcome !== 'auto_confirmed') { const notice = document.querySelector('#identity'); notice.textContent = 'Customer identity needs review before a callback can be scheduled.'; notice.hidden = false; return; }
+  if (data.identity.outcome === 'net_new') {
+    document.querySelector('#customerNameField').hidden = false;
+    document.querySelector('#customerName').required = true;
+  } else if (data.identity.outcome !== 'auto_confirmed') { const notice = document.querySelector('#identity'); notice.textContent = 'Customer identity needs review before a callback can be scheduled.'; notice.hidden = false; return; }
   if (!data.callbackWritesEnabled) { const notice = document.querySelector('#identity'); notice.textContent = 'Callback scheduling is temporarily unavailable.'; notice.hidden = false; return; }
   form.hidden = false;
   if (data.callbacks.length) {
@@ -42,7 +45,7 @@ form.addEventListener('submit', async (event) => {
   button.disabled = true;
   show('Scheduling...');
   try {
-    const callback = await request(`/api/engagement/callback-panel/${conversationId}/callbacks`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey }, body: JSON.stringify({ owner: document.querySelector('#owner').value, dueAt: document.querySelector('#dueAt').value, timezone: document.querySelector('#timezone').value, reason: document.querySelector('#reason').value }) });
+    const callback = await request(`/api/engagement/callback-panel/${conversationId}/callbacks`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey }, body: JSON.stringify({ customerName: document.querySelector('#customerName').value, owner: document.querySelector('#owner').value, dueAt: document.querySelector('#dueAt').value, timezone: document.querySelector('#timezone').value, reason: document.querySelector('#reason').value }) });
     show(`${callback.replayed ? 'Existing' : 'Scheduled'} callback ${callback.callback.callbackNumber}.`, 'success');
     if (callback.crmUrl) { const link = document.querySelector('#crmLink'); link.href = callback.crmUrl; link.textContent = 'Open CRM Callback'; link.hidden = false; }
     form.reset(); idempotencyKey = newIdempotencyKey();

@@ -13,6 +13,7 @@
     <a id="crmLink" class="crm-link" href="#" target="_blank" rel="noreferrer" hidden>Open CRM Contact</a>
     <section id="openCallbacks" hidden><h2>Open callbacks</h2><ul id="callbackList"></ul></section>
     <form id="form" hidden>
+      <label id="customerNameField" hidden>Customer name<input id="customerName" name="customerName" autocomplete="name" /></label>
       <label>Owner<input id="owner" name="owner" required autocomplete="name" /></label>
       <label>Due date and time<input id="dueAt" name="dueAt" type="datetime-local" required /></label>
       <label>Timezone<select id="timezone" name="timezone" required><option value="America/Los_Angeles">Pacific time</option><option value="America/Denver">Mountain time</option><option value="America/Chicago">Central time</option><option value="America/New_York">Eastern time</option></select></label>
