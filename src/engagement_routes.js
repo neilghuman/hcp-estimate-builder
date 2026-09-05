@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressWriteCanary, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
-import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, listDecidedIdentityReviews, updateCanaryContactAddress, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, listDecidedIdentityReviews, updateCanaryContactAddress, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 
 function credentialsMatch(actual, expected) {
@@ -88,10 +88,18 @@ export function registerEngagementRoutes(app, pool) {
           let contactId = plan.contactId || null;
           let externalIdentityLinkId = null;
           if (plan.action === 'link') {
-            const link = await createExternalIdentityLink(plan.link);
-            externalIdentityLinkId = link.id;
+            const existing = await findExternalIdentityLinkByExternalId({ sourceSystem: 'HousecallPro', externalId: review.externalId });
+            if (!existing) {
+              const link = await createExternalIdentityLink(plan.link);
+              externalIdentityLinkId = link.id;
+            } else if (String(existing.contactId) === String(plan.contactId)) {
+              if (existing.linkStatus !== 'Confirmed') await updateExternalIdentityLink(existing.id, { linkStatus: 'Confirmed' });
+              externalIdentityLinkId = existing.id;
+            } else {
+              throw Object.assign(new Error(`externalId is already linked to a different contact (${existing.contactId}); manual review required.`), { status: 409 });
+            }
           } else if (plan.action === 'create') {
-            const created = await createCanaryContactAndLink({ contact: plan.contact, link: plan.link });
+            const created = await createCanaryContactAndLink({ contact: plan.contact, link: plan.link, skipDuplicateCheck: true });
             contactId = created.contactId;
             externalIdentityLinkId = created.linkId;
           }

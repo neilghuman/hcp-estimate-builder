@@ -83,15 +83,17 @@ export function espocrmWriterConfigured() {
   return Boolean(cfg.baseUrl && cfg.writerApiKey);
 }
 
-async function post(pathname, body) {
+async function post(pathname, body, { skipDuplicateCheck = false } = {}) {
   const cfg = config();
   if (!cfg.baseUrl || !cfg.writerApiKey) throw new EspoCrmError('ENGAGEMENT_ESPOCRM_WRITER_API_KEY is not configured.', 503);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20_000);
   try {
+    const headers = { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Api-Key': cfg.writerApiKey, 'X-Requested-With': 'XMLHttpRequest' };
+    if (skipDuplicateCheck) headers['X-Skip-Duplicate-Check'] = 'true';
     const response = await fetch(`${cfg.baseUrl}/api/v1${pathname}`, {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Api-Key': cfg.writerApiKey, 'X-Requested-With': 'XMLHttpRequest' },
+      headers,
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
@@ -108,8 +110,8 @@ async function post(pathname, body) {
   }
 }
 
-export async function createCanaryContactAndLink({ contact, link }) {
-  const createdContact = await post('/Contact', contact);
+export async function createCanaryContactAndLink({ contact, link, skipDuplicateCheck = false }) {
+  const createdContact = await post('/Contact', contact, { skipDuplicateCheck });
   if (!createdContact?.id) throw new EspoCrmError('EspoCRM Contact create response did not include an ID.', 502);
   try {
     const createdLink = await post('/ExternalIdentityLink', { ...link, contactId: createdContact.id });
@@ -200,6 +202,19 @@ export async function createExternalIdentityLink(link) {
   const created = await post('/ExternalIdentityLink', link);
   if (!created?.id) throw new EspoCrmError('EspoCRM ExternalIdentityLink create response did not include an ID.', 502);
   return created;
+}
+
+export async function findExternalIdentityLinkByExternalId({ sourceSystem, externalId }) {
+  const params = new URLSearchParams();
+  params.set('where[0][type]', 'equals');
+  params.set('where[0][attribute]', 'externalId');
+  params.set('where[0][value]', String(externalId));
+  const data = await get(`/ExternalIdentityLink?${params.toString()}`);
+  return (data?.list || []).find((link) => link.sourceSystem === sourceSystem) || null;
+}
+
+export async function updateExternalIdentityLink(id, patch) {
+  return put(`/ExternalIdentityLink/${encodeURIComponent(id)}`, patch);
 }
 
 async function put(pathname, body) {
