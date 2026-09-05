@@ -422,6 +422,21 @@ export async function deleteMeetingRecord(id) {
   return del(`/Meeting/${encodeURIComponent(id)}`);
 }
 
+// Resolve an active EspoCRM user id by email address (used to assign a callback
+// meeting to the owner's calendar). Returns null when no active user matches.
+export async function findUserIdByEmail(email) {
+  const value = String(email || '').trim();
+  if (!value) return null;
+  const params = new URLSearchParams();
+  params.set('where[0][type]', 'equals');
+  params.set('where[0][attribute]', 'emailAddress');
+  params.set('where[0][value]', value);
+  params.set('select', 'id,isActive');
+  const data = await get(`/User?${params.toString()}`);
+  const match = (data?.list || []).find((user) => user.isActive !== false);
+  return match ? match.id : null;
+}
+
 export async function updateCallbackRecord(id, patch) {
   const body = {
     ...(patch?.owner !== undefined ? { owner: patch.owner } : {}),
