@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildCallbackCommandCenter, buildCallbackQueue, createCallbackStore, createPersistedCallbackStore, findDueCallbacks, rescheduleCallback, scheduleCallback, sendReminderForCallback, updateCallbackStatus } from '../src/callbacks.js';
-import { createCallbackRecord, createMeetingRecord, deleteMeetingRecord, listCallbackRecords, updateCallbackRecord, updateMeetingRecord } from '../src/engagement_espocrm.js';
+import { createCallbackRecord, createMeetingRecord, deleteMeetingRecord, findUserIdByEmail, listCallbackRecords, updateCallbackRecord, updateMeetingRecord } from '../src/engagement_espocrm.js';
 
 test('scheduleCallback requires a valid contact or phone and a due time', () => {
   assert.throws(() => scheduleCallback({ reason: 'Follow-up', dueAt: null }), /contactId/i);
@@ -397,6 +397,27 @@ test('EspoCRM callback adapter creates and lists callback records', async () => 
     assert.equal(rows.length, 1);
     assert.equal(rows[0].phone, '+12065551212');
     assert.equal(calls[0].method, 'POST');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('findUserIdByEmail returns the first active user id or null', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url), 'https://crm.test');
+    const email = u.searchParams.get('where[0][value]');
+    if (email === 'match@x.com') return { ok: true, text: async () => JSON.stringify({ list: [{ id: 'u-1', isActive: true }] }) };
+    if (email === 'inactive@x.com') return { ok: true, text: async () => JSON.stringify({ list: [{ id: 'u-2', isActive: false }] }) };
+    return { ok: true, text: async () => JSON.stringify({ list: [] }) };
+  };
+  try {
+    process.env.ENGAGEMENT_ESPOCRM_BASE_URL = 'https://crm.test';
+    process.env.ENGAGEMENT_ESPOCRM_API_KEY = 'reader-key';
+    assert.equal(await findUserIdByEmail('match@x.com'), 'u-1');
+    assert.equal(await findUserIdByEmail('inactive@x.com'), null);
+    assert.equal(await findUserIdByEmail('none@x.com'), null);
+    assert.equal(await findUserIdByEmail(''), null);
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -26,9 +26,9 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCanaryContactAndLink, createMeetingRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
-import { chatwootConfigured, getConversation, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
+import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
 import { buildReminderNote, conversationIdFromSource, selectDueReminders } from './src/reminders.js';
 // Load .env (tiny loader; avoids an extra dependency).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -143,9 +143,9 @@ function calendarSyncEnabled() {
   return String(process.env.ENGAGEMENT_CALLBACK_CALENDAR_ENABLED || 'false').toLowerCase() === 'true';
 }
 
-// Maps a callback owner (Chatwoot agent name) to an EspoCRM User id, so the
-// owner's Outlook calendar receives the meeting. JSON: { "<owner name>": "<userId>" }.
-function ownerToEspoUserId(owner) {
+// Explicit override map for owners whose Chatwoot email does not match their
+// EspoCRM user email. JSON: { "<owner name>": "<userId>" }.
+function ownerUserMapOverride(owner) {
   const key = String(owner || '').trim();
   if (!key) return null;
   let map = {};
@@ -154,13 +154,33 @@ function ownerToEspoUserId(owner) {
   return (map && typeof map === 'object' && map[key]) ? String(map[key]) : null;
 }
 
+// Resolves a callback owner to an EspoCRM User id: explicit map override first,
+// then the agent's email (from the dashboard agent, else looked up in Chatwoot by
+// id) matched to an EspoCRM user. Returns null when nothing resolves.
+async function resolveOwnerUserId(owner, agent = null) {
+  const override = ownerUserMapOverride(owner);
+  if (override) return override;
+  let email = String(agent?.email || '').trim();
+  if (!email && agent?.id && chatwootConfigured()) {
+    try {
+      const agents = await listAgents();
+      email = String((agents.find((a) => String(a.id) === String(agent.id)) || {}).email || '').trim();
+    } catch (error) {
+      console.warn('[CALLBACK_OWNER_AGENT_LOOKUP_FAILED]', error.message);
+    }
+  }
+  if (!email) return null;
+  try { return await findUserIdByEmail(email); }
+  catch (error) { console.warn('[CALLBACK_OWNER_EMAIL_RESOLVE_FAILED]', error.message); return null; }
+}
+
 // Creates an EspoCRM Meeting for the callback so it appears on the owner's
 // (Outlook-synced) calendar. Best-effort and idempotent per callback.
-async function syncCallbackMeeting(callback, customerName) {
+async function syncCallbackMeeting(callback, customerName, agent = null) {
   if (!calendarSyncEnabled() || callback.crmMeetingId) return callback;
   const crmConfigured = Boolean(process.env.ENGAGEMENT_ESPOCRM_BASE_URL && process.env.ENGAGEMENT_ESPOCRM_WRITER_API_KEY);
   if (!crmConfigured) return callback;
-  const assignedUserId = ownerToEspoUserId(callback.owner);
+  const assignedUserId = await resolveOwnerUserId(callback.owner, agent);
   if (!assignedUserId) return callback;
   const meeting = await createMeetingRecord({
     name: `Callback: ${customerName || callback.phone || 'customer'}`,
@@ -482,7 +502,7 @@ app.post('/api/engagement/callback-panel/:conversationId/callbacks', async (req,
       console.warn('[CALLBACK_PANEL_LABEL_SYNC_FAILED]', error.message);
     }
     try {
-      await syncCallbackMeeting(callback, panel.context.contact.name);
+      await syncCallbackMeeting(callback, panel.context.contact.name, agent);
     } catch (error) {
       console.warn('[CALLBACK_PANEL_MEETING_SYNC_FAILED]', error.message);
     }

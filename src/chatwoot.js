@@ -100,6 +100,18 @@ export async function listInboxes() {
   return payload.map((i) => ({ id: i.id, name: i.name || null, channel_type: i.channel_type || null }));
 }
 
+// Account agents, briefly cached. Used to resolve a callback owner's email server-side.
+let _agentsCache = { at: 0, agents: [] };
+export async function listAgents({ ttlMs = 60_000 } = {}) {
+  const acc = requireAccount();
+  if (Date.now() - _agentsCache.at < ttlMs && _agentsCache.agents.length) return _agentsCache.agents;
+  const data = await cwFetch(`/api/v1/accounts/${acc}/agents`);
+  const list = Array.isArray(data) ? data : (data && data.payload) || [];
+  const agents = list.map((a) => ({ id: a.id, name: a.name || null, email: a.email || null }));
+  _agentsCache = { at: Date.now(), agents };
+  return agents;
+}
+
 // Chatwoot "labels" are Chat Foundry "tags". Endpoint returns objects; older versions return strings.
 export async function listLabels() {
   const acc = requireAccount();
