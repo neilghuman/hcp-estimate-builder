@@ -1,4 +1,4 @@
-import { resolveIdentity } from './engagement_identity.js';
+import { normalizeEmail, normalizePhone, resolveIdentity } from './engagement_identity.js';
 
 function text(value) {
   const result = String(value ?? '').trim();
@@ -116,4 +116,51 @@ export function buildChatwootIdentityReview(context, { sourceAccountId, sourceUr
       conversationId: context.conversationId,
     },
   };
+}
+
+export function buildChatwootReviewExecutionPlan(review, context, { sourceAccountId, sourceUrl = null, defaultCountry = 'US' } = {}) {
+  const accountId = String(sourceAccountId || '').trim();
+  const decision = String(review?.decision || '').trim();
+  const reviewStatus = String(review?.reviewStatus || '').trim();
+  if (!accountId) throw Object.assign(new Error('CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID is not configured.'), { status: 503 });
+  if (review?.sourceSystem !== 'Chatwoot' || String(review.sourceAccountId || '') !== accountId) throw Object.assign(new Error('Review is not a Chatwoot review for this account.'), { status: 409 });
+  if (!decision) throw Object.assign(new Error('Review has no decision to execute.'), { status: 422 });
+  if (!['Open', 'InReview'].includes(reviewStatus)) throw Object.assign(new Error(`Review is not actionable (status ${reviewStatus || 'unknown'}).`), { status: 409 });
+  if (decision === 'Defer') return { action: 'defer', reviewUpdate: { reviewStatus: 'Deferred' } };
+  if (!context?.contact?.id || String(context.contact.id) !== String(review.externalId)) {
+    throw Object.assign(new Error('The current Chatwoot conversation does not match the review contact.'), { status: 409 });
+  }
+  const contactContext = {
+    chatwootAccountId: accountId,
+    chatwootContactId: String(context.contact.id),
+    chatwootUrl: sourceUrl,
+  };
+  const link = {
+    name: `Chatwoot:${accountId}:${context.contact.id}`,
+    sourceSystem: 'Chatwoot',
+    sourceAccountId: accountId,
+    externalId: String(context.contact.id),
+    linkStatus: 'Confirmed',
+    matchingEvidence: { source: 'identity_review', reviewId: review.id || null, decision, conversationId: context.conversationId },
+  };
+  if (decision === 'LinkExisting') {
+    const contactId = String(review.candidateContactId || '').trim();
+    if (!contactId) throw Object.assign(new Error('LinkExisting requires a candidateContactId on the review.'), { status: 422 });
+    return { action: 'link', contactId, link: { ...link, contactId }, contactContext, reviewUpdate: { reviewStatus: 'Linked' } };
+  }
+  if (decision === 'CreateNew' || decision === 'Separate') {
+    const nameParts = String(context.contact.name || '').trim().split(/\s+/).filter(Boolean);
+    const phone = normalizePhone(context.contact.phone, { defaultCountry });
+    const email = normalizeEmail(context.contact.email);
+    if (!nameParts.length) throw Object.assign(new Error('A Chatwoot contact name is required to create a CRM Contact.'), { status: 422 });
+    if (!phone && !email) throw Object.assign(new Error('A valid Chatwoot contact phone number or email is required to create a CRM Contact.'), { status: 422 });
+    return {
+      action: 'create',
+      contact: { firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || 'Customer', phoneNumber: phone, emailAddress: email },
+      link,
+      contactContext,
+      reviewUpdate: { reviewStatus: decision === 'Separate' ? 'Separate' : 'Created' },
+    };
+  }
+  throw Object.assign(new Error(`Unknown review decision: ${decision}.`), { status: 422 });
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildChatwootIdentityReview, buildConfirmedChatwootLinkPlan, buildChatwootWebhookDecision, normalizeChatwootConversationContext, resolveChatwootConversationContext } from '../src/engagement_chatwoot.js';
+import { buildChatwootIdentityReview, buildChatwootReviewExecutionPlan, buildConfirmedChatwootLinkPlan, buildChatwootWebhookDecision, normalizeChatwootConversationContext, resolveChatwootConversationContext } from '../src/engagement_chatwoot.js';
 
 const conversation = {
   id: 42,
@@ -101,4 +101,20 @@ test('non-confirmed Chatwoot contexts create a redacted identity review plan', (
 test('confirmed Chatwoot identities cannot create an unnecessary review', () => {
   const context = resolveChatwootConversationContext(conversation, { existingLink: { contactId: 'crm-1' } });
   assert.throws(() => buildChatwootIdentityReview(context, { sourceAccountId: '1' }), /does not require review/i);
+});
+
+test('Chatwoot LinkExisting review execution creates a Chatwoot link plan', () => {
+  const context = resolveChatwootConversationContext(conversation, { contacts: [{ id: 'crm-1', phoneNumber: '+12065551212' }] });
+  const plan = buildChatwootReviewExecutionPlan({ id: 'review-1', sourceSystem: 'Chatwoot', sourceAccountId: '1', externalId: '99', reviewStatus: 'Open', decision: 'LinkExisting', candidateContactId: 'crm-1' }, context, { sourceAccountId: '1', sourceUrl: 'https://chat.test/app/accounts/1/conversations/42' });
+  assert.equal(plan.action, 'link');
+  assert.equal(plan.link.sourceSystem, 'Chatwoot');
+  assert.equal(plan.link.externalId, '99');
+  assert.equal(plan.contactContext.chatwootContactId, '99');
+});
+
+test('Chatwoot review execution rejects a mismatched source account or contact', () => {
+  const context = resolveChatwootConversationContext(conversation, { contacts: [{ id: 'crm-1', phoneNumber: '+12065551212' }] });
+  const review = { id: 'review-1', sourceSystem: 'Chatwoot', sourceAccountId: '1', externalId: '99', reviewStatus: 'Open', decision: 'LinkExisting', candidateContactId: 'crm-1' };
+  assert.throws(() => buildChatwootReviewExecutionPlan({ ...review, sourceAccountId: 'other' }, context, { sourceAccountId: '1' }), /not a Chatwoot review/i);
+  assert.throws(() => buildChatwootReviewExecutionPlan({ ...review, externalId: 'other' }, context, { sourceAccountId: '1' }), /does not match/i);
 });
