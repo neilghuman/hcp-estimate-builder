@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { buildDryRunDecision, buildHcpCanaryProjection, buildHcpReconciliationDecisions, buildIdentityReview, buildReviewExecutionPlan, compareContactAddress, completeHcpImportRun, createHcpImportRun, createReconciliationRun, deriveBrandRelationships, engagementConfig, finishReconciliationRun, fingerprint, getHcpImportRun, recordAddressProjection, recordDryRunDecision, recordHcpImportBatch, recordReviewExecution, selectAddressBackfillCandidates, selectAddressWriteCanary, selectBrandBackfillCandidates, selectHcpCanaryCandidates, selectHcpImportCandidates, selectIdentityReviewCandidates, selectPrimaryHcpAddress, summarizeAddressAudit, summarizeReconciliation } from './engagement_runtime.js';
 import { buildChatwootIdentityReview, buildChatwootReviewExecutionPlan, buildConfirmedChatwootLinkPlan, buildChatwootWebhookDecision, resolveChatwootConversationContext } from './engagement_chatwoot.js';
-import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, getIdentityQualitySnapshot, listContactsWithAddresses, listContactsWithBrands, listDecidedIdentityReviews, updateCanaryContactAddress, updateCanaryContactBrands, updateContactChatwootContext, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
+import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, getIdentityQualitySnapshot, listContactsWithAddresses, listContactsWithBrands, listDecidedIdentityReviews, updateCanaryContactAddress, updateCanaryContactBrands, updateContactChatwootContext, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks, listFuzzyDuplicateReviews } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 import { chatwootConfigured, getConversation } from './chatwoot.js';
 import { completeLiveSyncRun, createLiveSyncRun, failLiveSyncRun, getLiveSyncState, saveLiveSyncCursor, selectLiveSyncWork } from './engagement_livesync.js';
@@ -32,11 +32,10 @@ export async function sweepFuzzyDuplicates(pool, { now: _now = new Date() } = {}
   const nameStrong = Math.min(Math.max(Number(process.env.ENGAGEMENT_FUZZY_NAME_STRONG) || 0.85, 0), 1);
   const maxReviews = Math.min(Math.max(Number(process.env.ENGAGEMENT_FUZZY_MAX_REVIEWS) || 25, 1), 100);
 
-  const [contacts, openReviews] = await Promise.all([listContactsForReconciliation(), listOpenIdentityReviews()]);
+  const [contacts, fuzzyReviews] = await Promise.all([listContactsForReconciliation(), listFuzzyDuplicateReviews()]);
   const contactsById = new Map(contacts.map((contact) => [String(contact.id), contact]));
-  const existingKeys = new Set(openReviews
-    .filter((review) => review.conflictSummary === 'fuzzy_duplicate')
-    .map((review) => String(review.externalId)));
+  // A cluster already surfaced once (in ANY review state, including dismissed/decided) is not re-flagged.
+  const existingKeys = new Set(fuzzyReviews.map((review) => String(review.externalId)));
   const clusters = findDuplicateClusters(contacts, { nameStrong, defaultCountry: cfg.defaultPhoneCountry });
 
   const runId = await createFuzzyDedupRun(pool);

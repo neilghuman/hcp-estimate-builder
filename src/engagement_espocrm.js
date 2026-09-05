@@ -268,6 +268,13 @@ export async function listDecidedIdentityReviews() {
   return (data?.list || []).filter((review) => ['Open', 'InReview'].includes(review.reviewStatus) && Boolean(review.decision));
 }
 
+// All non-deleted fuzzy-duplicate reviews regardless of status, so a cluster that was already
+// surfaced (even if dismissed/decided) is not re-flagged by the sweep.
+export async function listFuzzyDuplicateReviews() {
+  const data = await get('/IdentityReview?maxSize=200');
+  return (data?.list || []).filter((review) => review.conflictSummary === 'fuzzy_duplicate');
+}
+
 export async function createExternalIdentityLink(link) {
   const created = await post('/ExternalIdentityLink', link);
   if (!created?.id) throw new EspoCrmError('EspoCRM ExternalIdentityLink create response did not include an ID.', 502);
