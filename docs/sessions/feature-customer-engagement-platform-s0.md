@@ -313,6 +313,33 @@ Independent redacted verification passed 136/136 provisional links against live 
 The skipped field-conflict source remains untouched and should feed the next IdentityReview-creation
 hardening slice before any full import is approved.
 
+## IdentityReview Queue Canary
+
+Owner-approved and completed on 2026-09-05. A fresh reconciliation found 2 `identity_review`, 6
+`field_conflict`, 6 `provisional`, and 12 `malformed_or_no_key` outcomes. The queue writer is
+hard-capped at 10 and accepts only the first three decision types; malformed/no-key source records
+remain in the reconciliation data-quality report because they provide no identity evidence for a
+human link decision.
+
+Fresh verified backups preceded the queue canary:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/identity-review-canary-prerun-20260905T010247Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/identity-review-canary-prerun-20260905T010252Z`
+
+The first canary revealed two safe, corrected defects: the EspoCRM query filter was overly broad,
+and fields declared fully `readOnly` were silently dropped on create. The exact source-account
+lookup now filters normal GET results, while `matchingEvidence`, `conflictSummary`, and source sync
+fields are `readOnlyAfterCreate`. Fresh follow-up backups preceded deployment of those fixes at
+`identity-review-fix-prerun-20260905T010437Z` (EspoCRM) and
+`identity-review-fix-prerun-20260905T010442Z` (ScopeFoundry).
+
+The corrected canary created 9 evidence-complete reviews and correctly reused the 1 existing review.
+Current queue: 10 distinct open source identities, 4 provisional reviews, 5 field-conflict reviews,
+and the preserved first pre-fix provisional review without evidence. No duplicate open reviews
+exist. The pre-fix row must be resolved or annotated by a human; it is intentionally not rewritten.
+Both production gates are disabled. A subsequent readiness probe sent no queue request and the
+queue count remained 10.
+
 ## Deferred work
 
 - Chatwoot event ingestion and sidebar UI: Sprint 2 and Sprint 3.
