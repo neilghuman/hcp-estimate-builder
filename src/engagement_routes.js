@@ -127,18 +127,23 @@ export function registerEngagementRoutes(app, pool) {
       const existingSourceIds = new Set(links.map((link) => String(link.externalId)));
       const batch = selectHcpImportCandidates(customers, contacts, { limit: batchSize, existingSourceIds });
       const created = [];
+      const failed = [];
       for (const candidate of batch.selected) {
-        const decision = buildDryRunDecision({ sourceSystem: 'housecall_pro', sourceEventId: `import:${run.id}:${candidate.customer.id}`, record: candidate.customer, contacts });
-        const result = await createCanaryContactAndLink(candidate.projection);
-        decision.sourceEventId = `import:${run.id}:${fingerprint(candidate.customer.id)}`;
-        decision.result.contactId = result.contactId;
-        await recordDryRunDecision(pool, decision);
-        created.push({ hcpCustomerIdHash: fingerprint(candidate.customer.id), contactId: result.contactId, externalIdentityLinkId: result.linkId });
+        try {
+          const decision = buildDryRunDecision({ sourceSystem: 'housecall_pro', sourceEventId: `import:${run.id}:${candidate.customer.id}`, record: candidate.customer, contacts });
+          const result = await createCanaryContactAndLink({ ...candidate.projection, skipDuplicateCheck: true });
+          decision.sourceEventId = `import:${run.id}:${fingerprint(candidate.customer.id)}`;
+          decision.result.contactId = result.contactId;
+          await recordDryRunDecision(pool, decision);
+          created.push({ hcpCustomerIdHash: fingerprint(candidate.customer.id), contactId: result.contactId, externalIdentityLinkId: result.linkId });
+        } catch (error) {
+          failed.push({ hcpCustomerIdHash: fingerprint(candidate.customer.id), error: error.message, status: error.status || 500 });
+        }
       }
       await recordHcpImportBatch(pool, { runId: run.id, selectedCount: batch.selected.length, createdCount: created.length, skippedCounts: batch.skipped });
       const complete = batch.selected.length === 0;
       if (complete) await completeHcpImportRun(pool, run.id);
-      return res.status(201).json({ runId: run.id, batchSize, created, skipped: batch.skipped, complete });
+      return res.status(201).json({ runId: run.id, batchSize, created, failed, skipped: batch.skipped, complete });
     } catch (error) {
       if (run?.id) await recordHcpImportBatch(pool, { runId: run.id, selectedCount: 0, createdCount: 0, skippedCounts: {}, errorCode: 'batch_failed' }).catch(() => {});
       return res.status(error.status || 500).json({ error: error.message, runId: run?.id || null });
