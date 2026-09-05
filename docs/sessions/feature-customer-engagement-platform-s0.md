@@ -313,6 +313,27 @@ Independent redacted verification passed 136/136 provisional links against live 
 The skipped field-conflict source remains untouched and should feed the next IdentityReview-creation
 hardening slice before any full import is approved.
 
+## Expanded 25-Record HCP Address Backfill
+
+Owner-approved and completed on 2026-09-05. This endpoint is distinct from the 10-record address
+canary and hard-capped at 25. It operates only on already provisional HCP links whose Contact has a
+blank native address and a complete, unambiguous billing-first candidate. Each update is re-read
+from EspoCRM before a fingerprint-only address event is written.
+
+Fresh verified backups preceded the run:
+
+- EspoCRM: `/home/neilghuman/espocrm/prod/backups/customer-engagement-platform/hcp-address-backfill-25-prerun-20260905T011632Z`
+- ScopeFoundry: `/home/neilghuman/backups/customer-engagement-platform/hcp-address-backfill-25-prerun-20260905T011636Z`
+
+The batch updated 25 addresses: 20 billing addresses and 5 sole-service fallbacks. It skipped 11
+existing exact matches and 2 records with no complete HCP address. Post-run: 36 Contacts have an
+address and all 36 successful address writes have a linked sanitized audit event. Both gates were
+restored to `false`.
+
+A full read-only audit across all 136 provisional HCP links reports 36 exact matches, 0 conflicts,
+92 blank Contacts with a safe candidate for later backfill, 8 records with no complete address,
+and 0 multiple-billing or multiple-service ambiguities under the billing-first policy.
+
 ## IdentityReview Queue Canary
 
 Owner-approved and completed on 2026-09-05. A fresh reconciliation found 2 `identity_review`, 6
