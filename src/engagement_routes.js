@@ -4,6 +4,7 @@ import { buildChatwootIdentityReview, buildChatwootReviewExecutionPlan, buildCon
 import { createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, findExternalIdentityLinkByExternalId, findOpenIdentityReview, getContactForAddressAudit, getEspoCrmInventory, getIdentityQualitySnapshot, listContactsWithAddresses, listContactsWithBrands, listDecidedIdentityReviews, updateCanaryContactAddress, updateCanaryContactBrands, updateContactChatwootContext, updateExternalIdentityLink, updateIdentityReview, espocrmAddressWriterConfigured, espocrmConfigured, espocrmWriterConfigured, listContactsForReconciliation, listHcpIdentityLinks, listOpenIdentityReviews, listProvisionalHcpIdentityLinks } from './engagement_espocrm.js';
 import { getCustomerForReconciliation, listCustomerAddresses, listCustomersForReconciliation } from './hcp.js';
 import { chatwootConfigured, getConversation } from './chatwoot.js';
+import { completeLiveSyncRun, createLiveSyncRun, failLiveSyncRun, getLiveSyncState, saveLiveSyncCursor, selectLiveSyncWork } from './engagement_livesync.js';
 
 function credentialsMatch(actual, expected) {
   const left = Buffer.from(String(actual || ''));
@@ -11,10 +12,89 @@ function credentialsMatch(actual, expected) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+export function hcpLiveSyncEnabled() {
+  return engagementConfig().hcpLiveSyncEnabled;
+}
+
+// One incremental HCP -> EspoCRM live-sync tick. Reuses the gated canary projection and
+// IdentityReview helpers, so it inherits every identity guardrail. Clean net_new customers
+// become Contacts; ambiguous/provisional/conflict customers are queued to IdentityReview.
+// Never auto-merges. The cursor only advances when the whole batch's writes succeeded, so a
+// transient EspoCRM failure is safely retried next tick (idempotent via existing-link/review dedup).
+export async function sweepHcpLiveSync(pool, { now = new Date() } = {}) {
+  const cfg = engagementConfig();
+  if (!cfg.hcpLiveSyncEnabled) return { skipped: true, reason: 'disabled' };
+  if (!cfg.identityWritesEnabled) return { skipped: true, reason: 'identity_writes_off' };
+  if (!espocrmWriterConfigured()) return { skipped: true, reason: 'espocrm_writer_unconfigured' };
+
+  const batchLimit = Math.min(Math.max(Number(process.env.ENGAGEMENT_HCP_LIVE_SYNC_BATCH) || 25, 1), 50);
+  const sourceAccountId = String(process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID || '').trim();
+
+  const [customers, contacts, links, openReviews, state] = await Promise.all([
+    listCustomersForReconciliation(),
+    listContactsForReconciliation(),
+    listHcpIdentityLinks(),
+    listOpenIdentityReviews(),
+    getLiveSyncState(pool),
+  ]);
+  const existingLinkSourceIds = new Set(links.map((link) => String(link.externalId)));
+  const existingReviewSourceIds = new Set(openReviews
+    .filter((review) => review.sourceSystem === 'HousecallPro' && (!sourceAccountId || review.sourceAccountId === sourceAccountId))
+    .map((review) => String(review.externalId)));
+
+  const work = selectLiveSyncWork(customers, contacts, { cursor: state.cursor, batchLimit, existingLinkSourceIds, existingReviewSourceIds, now });
+  const runId = await createLiveSyncRun(pool, { firstRun: work.firstRun, cursorBefore: state.cursor });
+  try {
+    if (work.firstRun) {
+      await saveLiveSyncCursor(pool, work.nextCursor, { initialized: true });
+      await completeLiveSyncRun(pool, runId, { cursorAfter: work.nextCursor });
+      return { skipped: false, firstRun: true, cursor: work.nextCursor, examined: 0, created: 0, queued: 0, failed: 0 };
+    }
+
+    const created = [];
+    const queued = [];
+    const failed = [];
+
+    for (const item of work.imports) {
+      try {
+        const decision = buildDryRunDecision({ sourceSystem: 'housecall_pro', sourceEventId: `livesync:${runId}:${item.customer.id}`, record: item.customer, contacts });
+        const result = await createCanaryContactAndLink({ ...item.projection, skipDuplicateCheck: true });
+        decision.sourceEventId = `livesync:${runId}:${fingerprint(item.customer.id)}`;
+        decision.result.contactId = result.contactId;
+        await recordDryRunDecision(pool, decision);
+        created.push({ hcpCustomerIdHash: fingerprint(item.customer.id), contactId: result.contactId, externalIdentityLinkId: result.linkId });
+      } catch (error) {
+        failed.push({ hcpCustomerIdHash: fingerprint(item.customer.id), stage: 'import', error: error.message });
+      }
+    }
+
+    for (const item of work.reviews) {
+      try {
+        const review = buildIdentityReview(item.customer, item.result);
+        const open = await findOpenIdentityReview(review);
+        if (open) { queued.push({ identityReviewId: open.id, existing: true, outcome: item.result.outcome }); continue; }
+        const inserted = await createIdentityReview(review);
+        queued.push({ identityReviewId: inserted.id, existing: false, outcome: item.result.outcome });
+      } catch (error) {
+        failed.push({ hcpCustomerIdHash: fingerprint(item.customer.id), stage: 'review', error: error.message });
+      }
+    }
+
+    // Advance the cursor only when every write succeeded; otherwise hold it and retry next tick.
+    const cursorAfter = failed.length === 0 ? work.nextCursor : state.cursor;
+    await saveLiveSyncCursor(pool, cursorAfter);
+    await completeLiveSyncRun(pool, runId, { cursorAfter, examined: work.examined, created: created.length, queued: queued.length, failed: failed.length, skipped: work.skipped });
+    return { skipped: false, firstRun: false, cursor: cursorAfter, examined: work.examined, created: created.length, queued: queued.length, failed: failed.length, remaining: work.remaining, skippedCounts: work.skipped };
+  } catch (error) {
+    await failLiveSyncRun(pool, runId, 'live_sync_failed').catch(() => {});
+    throw error;
+  }
+}
+
 export function registerEngagementRoutes(app, pool) {
   app.get('/api/integrations/identity/config', (_req, res) => {
     const config = engagementConfig();
-    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, chatwootWebhookEnabled: config.chatwootWebhookEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), espocrmAddressWriterConfigured: espocrmAddressWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
+    res.json({ configured: config.configured, identityWritesEnabled: config.identityWritesEnabled, reconciliationEnabled: config.reconciliationEnabled, chatwootWebhookEnabled: config.chatwootWebhookEnabled, hcpLiveSyncEnabled: config.hcpLiveSyncEnabled, espocrmConfigured: espocrmConfigured(), espocrmWriterConfigured: espocrmWriterConfigured(), espocrmAddressWriterConfigured: espocrmAddressWriterConfigured(), defaultPhoneCountry: config.defaultPhoneCountry });
   });
 
   const requireIntegrationAuth = (req, res, next) => {
@@ -318,6 +398,17 @@ export function registerEngagementRoutes(app, pool) {
     } catch (error) {
       if (run?.id) await recordHcpImportBatch(pool, { runId: run.id, selectedCount: 0, createdCount: 0, skippedCounts: {}, errorCode: 'batch_failed' }).catch(() => {});
       return res.status(error.status || 500).json({ error: error.message, runId: run?.id || null });
+    }
+  });
+
+  app.post('/api/integrations/identity/live-sync/sweep', requireIntegrationAuth, async (_req, res) => {
+    if (!engagementConfig().hcpLiveSyncEnabled) return res.status(403).json({ error: 'ENGAGEMENT_HCP_LIVE_SYNC_ENABLED is off.' });
+    if (!engagementConfig().identityWritesEnabled) return res.status(403).json({ error: 'ENGAGEMENT_IDENTITY_WRITES_ENABLED is off.' });
+    try {
+      const result = await sweepHcpLiveSync(pool);
+      return res.status(200).json(result);
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message });
     }
   });
 
