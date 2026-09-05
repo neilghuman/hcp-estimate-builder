@@ -323,9 +323,16 @@ test('EspoCRM callback adapter creates and lists callback records', async () => 
     assert.equal(created.id, 'cb-crm-1');
     assert.equal(created.owner, 'agent-42');
 
-    const updated = await updateCallbackRecord('cb-crm-1', { owner: 'agent-99', status: 'completed', outcome: 'resolved' });
+    const postCall = calls.find((call) => call.method === 'POST');
+    assert.equal(postCall.body.dueAt, '2026-09-05 12:00:00', 'dueAt must be sent in EspoCRM datetime format, not ISO 8601');
+    assert.doesNotMatch(String(postCall.body.dueAt), /[TZ]/);
+
+    const updated = await updateCallbackRecord('cb-crm-1', { owner: 'agent-99', status: 'completed', outcome: 'resolved', dueAt: '2026-09-06T15:30:00Z' });
     assert.equal(updated.owner, 'agent-99');
     assert.equal(updated.status, 'completed');
+
+    const putCall = calls.find((call) => call.method === 'PUT');
+    assert.equal(putCall.body.dueAt, '2026-09-06 15:30:00', 'updateCallbackRecord must format dueAt for EspoCRM');
 
     const rows = await listCallbackRecords();
     assert.equal(rows.length, 1);
