@@ -1,7 +1,11 @@
 const conversationId = new URLSearchParams(location.search).get('conversationId');
 const form = document.querySelector('#form');
 const message = document.querySelector('#message');
-let idempotencyKey = crypto.randomUUID();
+function newIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() || `panel-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+let idempotencyKey = newIdempotencyKey();
 
 function show(text, kind = '') { message.textContent = text; message.className = `message ${kind}`; }
 function fmt(value) { return new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
@@ -41,7 +45,7 @@ form.addEventListener('submit', async (event) => {
     const callback = await request(`/api/engagement/callback-panel/${conversationId}/callbacks`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey }, body: JSON.stringify({ owner: document.querySelector('#owner').value, dueAt: document.querySelector('#dueAt').value, timezone: document.querySelector('#timezone').value, reason: document.querySelector('#reason').value }) });
     show(`${callback.replayed ? 'Existing' : 'Scheduled'} callback ${callback.callback.callbackNumber}.`, 'success');
     if (callback.crmUrl) { const link = document.querySelector('#crmLink'); link.href = callback.crmUrl; link.textContent = 'Open CRM Callback'; link.hidden = false; }
-    form.reset(); idempotencyKey = crypto.randomUUID();
+    form.reset(); idempotencyKey = newIdempotencyKey();
   } catch (error) { show(error.message, 'error'); }
   finally { button.disabled = false; }
 });
