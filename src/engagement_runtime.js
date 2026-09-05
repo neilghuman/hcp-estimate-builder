@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { normalizeEmail, normalizePhone, resolveIdentity } from './engagement_identity.js';
+import { resolveBrand } from './brands.js';
 
 export function fingerprint(value) {
   return value ? crypto.createHash('sha256').update(String(value)).digest('hex') : null;
@@ -120,6 +121,16 @@ export async function recordDryRunDecision(pool, decision) {
   }
 }
 
+export function deriveBrandRelationships(tags) {
+  const brands = [];
+  for (const tag of tags || []) {
+    const brand = resolveBrand(tag);
+    if (brand && !brands.includes(brand.key)) brands.push(brand.key);
+  }
+  // HCP appends tags, so the last recognized brand tag is the most recent context.
+  return { brandRelationships: brands, primaryBrand: brands.length ? brands[brands.length - 1] : null };
+}
+
 export function buildHcpCanaryProjection(customer) {
   const firstName = String(customer?.firstName || '').trim();
   const lastName = String(customer?.lastName || '').trim();
@@ -131,8 +142,16 @@ export function buildHcpCanaryProjection(customer) {
   if (!sourceAccountId) throw Object.assign(new Error('ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID is not configured.'), { status: 503 });
   if (!firstName && !lastName) throw Object.assign(new Error('A customer name is required for the Contact canary.'), { status: 422 });
   if (!phone && !email) throw Object.assign(new Error('A valid HCP phone number or email is required for the Contact canary.'), { status: 422 });
+  const { brandRelationships, primaryBrand } = deriveBrandRelationships(customer?.tags);
   return {
-    contact: { firstName: firstName || 'Unknown', lastName: lastName || 'Customer', phoneNumber: phone, emailAddress: email },
+    contact: {
+      firstName: firstName || 'Unknown',
+      lastName: lastName || 'Customer',
+      phoneNumber: phone,
+      emailAddress: email,
+      ...(brandRelationships.length ? { brandRelationships } : {}),
+      ...(primaryBrand ? { primaryBrand } : {}),
+    },
     link: {
       name: `HousecallPro:${externalId}`,
       sourceSystem: 'HousecallPro',
@@ -263,6 +282,30 @@ export function selectAddressBackfillCandidates(links, contactsById, { limit = 1
     if (!contact) { skipped.contact_missing = (skipped.contact_missing || 0) + 1; continue; }
     if (!isContactAddressBlank(contact)) { skipped.has_address = (skipped.has_address || 0) + 1; continue; }
     selected.push({ contactId: String(link.contactId), linkId: String(link.id), externalId: String(link.externalId) });
+  }
+  return { selected, skipped, limit: cap };
+}
+
+export function selectBrandBackfillCandidates(links, customersByExternalId, contactsById, { limit = 200, maxLimit = 400 } = {}) {
+  const cap = Math.min(Math.max(Number(limit) || maxLimit, 1), maxLimit);
+  const customers = customersByExternalId instanceof Map ? customersByExternalId : new Map(Object.entries(customersByExternalId || {}));
+  const contacts = contactsById instanceof Map ? contactsById : new Map(Object.entries(contactsById || {}));
+  const selected = [];
+  const skipped = {};
+  for (const link of links || []) {
+    if (selected.length >= cap) break;
+    const customer = customers.get(String(link.externalId));
+    if (!customer) { skipped.customer_missing = (skipped.customer_missing || 0) + 1; continue; }
+    const { brandRelationships, primaryBrand } = deriveBrandRelationships(customer.tags);
+    if (!brandRelationships.length) { skipped.no_brand_tags = (skipped.no_brand_tags || 0) + 1; continue; }
+    const contact = contacts.get(String(link.contactId));
+    const current = Array.isArray(contact?.brandRelationships) ? contact.brandRelationships : [];
+    const missing = brandRelationships.filter((brand) => !current.includes(brand));
+    const needsPrimary = Boolean(primaryBrand) && !contact?.primaryBrand;
+    if (!missing.length && !needsPrimary) { skipped.already_current = (skipped.already_current || 0) + 1; continue; }
+    // Union only; a sync never removes an existing brand relationship.
+    const union = Array.from(new Set([...current, ...brandRelationships]));
+    selected.push({ contactId: String(link.contactId), linkId: String(link.id), brandRelationships: union, primaryBrand: contact?.primaryBrand || primaryBrand });
   }
   return { selected, skipped, limit: cap };
 }

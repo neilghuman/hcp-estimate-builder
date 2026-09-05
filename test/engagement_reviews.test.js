@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReviewExecutionPlan, isContactAddressBlank, selectAddressBackfillCandidates } from '../src/engagement_runtime.js';
+import { buildReviewExecutionPlan, deriveBrandRelationships, isContactAddressBlank, selectAddressBackfillCandidates, selectBrandBackfillCandidates } from '../src/engagement_runtime.js';
 
 const SOURCE_ACCOUNT = 'hcp-production-shared';
 process.env.ENGAGEMENT_HCP_SOURCE_ACCOUNT_ID = SOURCE_ACCOUNT;
@@ -103,4 +103,41 @@ test('address backfill selects only blank contacts, caps, and reports skips', ()
   assert.deepEqual(all.selected.map((c) => c.contactId), ['c1', 'c3']);
   assert.equal(all.skipped.has_address, 1);
   assert.equal(all.skipped.contact_missing, 1);
+});
+
+test('deriveBrandRelationships maps recognized brand tags and ignores non-brand tags', () => {
+  const r = deriveBrandRelationships(['Website Lead', 'Tree', 'Landscaping', 'Lessen']);
+  assert.deepEqual(r.brandRelationships, ['trees', 'landscaping']);
+  assert.equal(r.primaryBrand, 'landscaping');
+  assert.deepEqual(deriveBrandRelationships([]).brandRelationships, []);
+  assert.equal(deriveBrandRelationships(['Website Lead']).primaryBrand, null);
+});
+
+test('brand backfill unions brands, never removes, and skips already-current contacts', () => {
+  const links = [
+    { id: 'l1', contactId: 'c1', externalId: 'cus_1' },
+    { id: 'l2', contactId: 'c2', externalId: 'cus_2' },
+    { id: 'l3', contactId: 'c3', externalId: 'cus_3' },
+    { id: 'l4', contactId: 'c4', externalId: 'cus_4' },
+  ];
+  const customers = new Map([
+    ['cus_1', { id: 'cus_1', tags: ['Tree'] }],
+    ['cus_2', { id: 'cus_2', tags: ['Website Lead'] }],
+    ['cus_3', { id: 'cus_3', tags: ['Landscaping'] }],
+    ['cus_4', { id: 'cus_4', tags: ['Roofing'] }],
+  ]);
+  const contacts = new Map([
+    ['c1', { id: 'c1', brandRelationships: [] }],
+    ['c3', { id: 'c3', brandRelationships: ['landscaping'], primaryBrand: 'landscaping' }],
+    ['c4', { id: 'c4', brandRelationships: ['construction'], primaryBrand: 'construction' }],
+  ]);
+  const batch = selectBrandBackfillCandidates(links, customers, contacts, { maxLimit: 400 });
+  assert.equal(batch.skipped.no_brand_tags, 1);
+  assert.equal(batch.skipped.already_current, 1);
+  const c1 = batch.selected.find((c) => c.contactId === 'c1');
+  assert.deepEqual(c1.brandRelationships, ['trees']);
+  assert.equal(c1.primaryBrand, 'trees');
+  const c4 = batch.selected.find((c) => c.contactId === 'c4');
+  assert.deepEqual(c4.brandRelationships.sort(), ['construction', 'roofing']);
+  assert.equal(c4.primaryBrand, 'construction');
 });
