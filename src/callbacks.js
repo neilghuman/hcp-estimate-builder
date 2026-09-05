@@ -442,6 +442,29 @@ export function createPersistedCallbackStore({ pool, table = 'callback_records' 
       );
       return updated;
     },
+    // Atomically claim a reminder stage (lead|due) for a callback. Returns true
+    // only for the caller that inserted the row, so overlapping sweeps send once.
+    async claimReminderStage(callbackId, stage, channel = 'chatwoot_private_note') {
+      const result = await pool.query(
+        `INSERT INTO callback_reminders (callback_id, stage, channel, status) VALUES ($1, $2, $3, 'pending')
+         ON CONFLICT (callback_id, stage) DO NOTHING RETURNING callback_id`,
+        [String(callbackId), String(stage), String(channel)]
+      );
+      return result.rowCount > 0;
+    },
+    async markReminderStage(callbackId, stage, status, detail = null) {
+      await pool.query(
+        `UPDATE callback_reminders SET status = $3, detail = $4, sent_at = NOW() WHERE callback_id = $1 AND stage = $2`,
+        [String(callbackId), String(stage), String(status), detail == null ? null : String(detail)]
+      );
+    },
+    // Sets reminder_sent_at once (first auto reminder) so the panel reflects it.
+    async markReminderSentOnce(id) {
+      await pool.query(
+        `UPDATE ${table} SET reminder_sent_at = COALESCE(reminder_sent_at, NOW()), updated_at = NOW() WHERE id = $1`,
+        [id]
+      );
+    },
     async sendReminder(id) {
       await migrate();
       const callback = await this.get(id);

@@ -25,8 +25,25 @@ export function selectDueReminders(callbacks = [], now = new Date(), leadTimeMs 
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
 }
 
+// Emit the reminder stages that are time-eligible now for each open,
+// conversation-linked callback: 'lead' (within the lead window before due) and
+// 'due' (at/after the due time). Per-stage dedup is handled by claimReminderStage.
+export function selectReminderStages(callbacks = [], now = new Date(), leadTimeMs = 15 * 60 * 1000) {
+  const current = new Date(now).getTime();
+  const lead = Math.max(0, Number(leadTimeMs) || 0);
+  const out = [];
+  for (const callback of callbacks) {
+    if (!callback || !OPEN_STATUSES.has(callback.status) || !conversationIdFromSource(callback.source)) continue;
+    const due = new Date(callback.dueAt).getTime();
+    if (Number.isNaN(due)) continue;
+    if (current >= due) out.push({ callback, stage: 'due' });
+    else if (current >= due - lead) out.push({ callback, stage: 'lead' });
+  }
+  return out.sort((a, b) => new Date(a.callback.dueAt).getTime() - new Date(b.callback.dueAt).getTime());
+}
+
 // Build the internal note text for a due callback.
-export function buildReminderNote(callback, { timeZone = 'America/Los_Angeles' } = {}) {
+export function buildReminderNote(callback, { timeZone = 'America/Los_Angeles', stage = 'lead' } = {}) {
   const customer = String(callback.customerName || callback.phone || 'the customer').trim();
   let dueLabel = String(callback.dueAt || '');
   try {
@@ -34,8 +51,9 @@ export function buildReminderNote(callback, { timeZone = 'America/Los_Angeles' }
       timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
     }).format(new Date(callback.dueAt));
   } catch { /* keep raw dueAt */ }
+  const lead = stage === 'due' ? '\u23F0 Callback now due' : '\u23F0 Callback due soon';
   const parts = [
-    `\u23F0 Callback due ${dueLabel} (Pacific) for ${customer}.`,
+    `${lead} ${dueLabel} (Pacific) for ${customer}.`,
     callback.owner ? `Owner: ${callback.owner}.` : null,
     callback.reason ? `Reason: ${callback.reason}.` : null,
     callback.callbackNumber ? `[${callback.callbackNumber}]` : null,
