@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Customer follow-up</title>
-  <link rel="stylesheet" href="callback-panel.css?v=5" />
+  <link rel="stylesheet" href="callback-panel.css?v=6" />
 </head>
 <body>
   <main class="panel">
@@ -21,7 +21,15 @@
       <h2>Park for later</h2>
       <p id="parkText" class="confirm-text"></p>
       <label>Task title<input id="parkTaskTitle" name="parkTaskTitle" placeholder="Identify customer and follow up" /></label>
-      <label>Due date and time<input id="parkDueAt" name="parkDueAt" type="datetime-local" /></label>
+      <div class="due-grid">
+        <label>Due date<input id="parkDueDate" name="parkDueDate" type="date" /></label>
+        <label>Time<input id="parkDueTime" name="parkDueTime" type="text" inputmode="text" autocomplete="off" placeholder="3pm or 3:30 PM" /></label>
+      </div>
+      <div class="quick-times" data-date-target="parkDueDate" data-time-target="parkDueTime">
+        <button type="button" data-day="today" data-time="4:00 PM">Today 4 PM</button>
+        <button type="button" data-day="tomorrow" data-time="9:00 AM">Tomorrow 9 AM</button>
+        <button type="button" data-day="tomorrow" data-time="1:00 PM">Tomorrow 1 PM</button>
+      </div>
       <p class="timezone">Pacific time</p>
       <label>Notes<textarea id="parkTaskDetails" name="parkTaskDetails" rows="3" placeholder="What do you need to research before following up?"></textarea></label>
       <button id="parkCustomerBtn" type="button">Park for later</button>
@@ -37,7 +45,15 @@
     </nav>
     <form id="callbackForm" hidden>
       <p id="owner" class="owner" hidden></p>
-      <label>Due date and time<input id="dueAt" name="dueAt" type="datetime-local" required /></label>
+      <div class="due-grid">
+        <label>Due date<input id="dueDate" name="dueDate" type="date" required /></label>
+        <label>Time<input id="dueTime" name="dueTime" type="text" inputmode="text" autocomplete="off" required placeholder="3pm or 3:30 PM" /></label>
+      </div>
+      <div class="quick-times" data-date-target="dueDate" data-time-target="dueTime">
+        <button type="button" data-day="today" data-time="4:00 PM">Today 4 PM</button>
+        <button type="button" data-day="tomorrow" data-time="9:00 AM">Tomorrow 9 AM</button>
+        <button type="button" data-day="tomorrow" data-time="1:00 PM">Tomorrow 1 PM</button>
+      </div>
       <p class="timezone">Pacific time</p>
       <label>Reason<textarea id="reason" name="reason" rows="3" required placeholder="What needs to happen on this callback?"></textarea></label>
       <button id="submit" type="submit">Schedule callback</button>
@@ -45,13 +61,21 @@
     <form id="taskForm" hidden>
       <p id="taskOwner" class="owner" hidden></p>
       <label>Task title<input id="taskTitle" name="taskTitle" required placeholder="Research and call customer back" /></label>
-      <label>Due date and time<input id="taskDueAt" name="taskDueAt" type="datetime-local" required /></label>
+      <div class="due-grid">
+        <label>Due date<input id="taskDueDate" name="taskDueDate" type="date" required /></label>
+        <label>Time<input id="taskDueTime" name="taskDueTime" type="text" inputmode="text" autocomplete="off" required placeholder="3pm or 3:30 PM" /></label>
+      </div>
+      <div class="quick-times" data-date-target="taskDueDate" data-time-target="taskDueTime">
+        <button type="button" data-day="today" data-time="4:00 PM">Today 4 PM</button>
+        <button type="button" data-day="tomorrow" data-time="9:00 AM">Tomorrow 9 AM</button>
+        <button type="button" data-day="tomorrow" data-time="1:00 PM">Tomorrow 1 PM</button>
+      </div>
       <p class="timezone">Pacific time</p>
       <label>Details<textarea id="taskDetails" name="taskDetails" rows="4" placeholder="What do you need to remember before following up?"></textarea></label>
       <button id="taskSubmit" type="submit">Create task</button>
     </form>
     <p id="message" class="message" role="status"></p>
   </main>
-  <script src="callback-panel.js?v=8"></script>
+  <script src="callback-panel.js?v=9"></script>
 </body>
 </html>

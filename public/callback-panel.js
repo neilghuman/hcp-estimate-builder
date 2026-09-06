@@ -15,6 +15,53 @@ let idempotencyKey = newIdempotencyKey();
 function show(text, kind = '') { message.textContent = text; message.className = `message ${kind}`; }
 function fmt(value) { return new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
 
+function pad(value) { return String(value).padStart(2, '0'); }
+function dateValue(offsetDays = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function parseTimeInput(value) {
+  const raw = String(value || '').trim().toLowerCase().replace(/\s+/g, '').replace(/\./g, '');
+  if (!raw) return null;
+  const suffixMatch = raw.match(/(am|pm|a|p)$/);
+  const suffix = suffixMatch ? suffixMatch[1][0] : '';
+  const body = suffix ? raw.slice(0, -suffixMatch[0].length) : raw;
+  let hour;
+  let minute = 0;
+  if (body.includes(':')) {
+    const parts = body.split(':');
+    if (parts.length !== 2 || !/^\d{1,2}$/.test(parts[0]) || !/^\d{2}$/.test(parts[1])) return null;
+    hour = Number(parts[0]);
+    minute = Number(parts[1]);
+  } else {
+    if (!/^\d{1,4}$/.test(body)) return null;
+    if (body.length <= 2) hour = Number(body);
+    else { hour = Number(body.slice(0, -2)); minute = Number(body.slice(-2)); }
+  }
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+  if (suffix) {
+    if (hour < 1 || hour > 12) return null;
+    if (suffix === 'p' && hour !== 12) hour += 12;
+    if (suffix === 'a' && hour === 12) hour = 0;
+  } else if (hour >= 1 && hour <= 6) {
+    hour += 12;
+  }
+  if (hour < 0 || hour > 23) return null;
+  return `${pad(hour)}:${pad(minute)}`;
+}
+
+function dueValue(dateId, timeId, { required = true } = {}) {
+  const date = document.querySelector(`#${dateId}`).value;
+  const timeRaw = document.querySelector(`#${timeId}`).value;
+  if (!date && !timeRaw && !required) return '';
+  if (!date) throw new Error('Choose a due date.');
+  const time = parseTimeInput(timeRaw);
+  if (!time) throw new Error('Enter a time like 3pm, 3:30 PM, 330p, or 15:30.');
+  return `${date}T${time}`;
+}
+
 async function request(path, options = {}) {
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({}));
@@ -176,6 +223,14 @@ document.querySelector('#tabs').addEventListener('click', (event) => {
   setTab(button.dataset.tab);
 });
 
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('.quick-times button');
+  if (!button) return;
+  const group = button.closest('.quick-times');
+  document.querySelector(`#${group.dataset.dateTarget}`).value = dateValue(button.dataset.day === 'tomorrow' ? 1 : 0);
+  document.querySelector(`#${group.dataset.timeTarget}`).value = button.dataset.time;
+});
+
 document.querySelector('#confirmCustomerBtn').addEventListener('click', async () => {
   const button = document.querySelector('#confirmCustomerBtn');
   button.disabled = true;
@@ -211,7 +266,7 @@ document.querySelector('#parkCustomerBtn').addEventListener('click', async () =>
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         taskTitle: document.querySelector('#parkTaskTitle').value,
-        dueAt: document.querySelector('#parkDueAt').value,
+        dueAt: dueValue('parkDueDate', 'parkDueTime', { required: false }),
         taskDetails: document.querySelector('#parkTaskDetails').value,
         agent: currentAgent,
       }),
@@ -228,7 +283,7 @@ callbackForm.addEventListener('submit', async (event) => {
   button.disabled = true;
   show('Scheduling...');
   try {
-    const callback = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/callbacks`), { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey }, body: JSON.stringify({ ...customerFields(), dueAt: document.querySelector('#dueAt').value, reason: document.querySelector('#reason').value, agent: currentAgent }) });
+    const callback = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/callbacks`), { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': idempotencyKey }, body: JSON.stringify({ ...customerFields(), dueAt: dueValue('dueDate', 'dueTime'), reason: document.querySelector('#reason').value, agent: currentAgent }) });
     show(`${callback.replayed ? 'Existing' : 'Scheduled'} callback ${callback.callback.callbackNumber}.`, 'success');
     if (callback.crmUrl) { const link = document.querySelector('#crmLink'); link.href = callback.crmUrl; link.textContent = 'Open CRM Callback'; link.hidden = false; }
     callbackForm.reset(); idempotencyKey = newIdempotencyKey();
@@ -242,7 +297,7 @@ taskForm.addEventListener('submit', async (event) => {
   button.disabled = true;
   show('Creating task...');
   try {
-    const result = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/tasks`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...customerFields(), title: document.querySelector('#taskTitle').value, dueAt: document.querySelector('#taskDueAt').value, details: document.querySelector('#taskDetails').value, agent: currentAgent }) });
+    const result = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/tasks`), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...customerFields(), title: document.querySelector('#taskTitle').value, dueAt: dueValue('taskDueDate', 'taskDueTime'), details: document.querySelector('#taskDetails').value, agent: currentAgent }) });
     show('Task created in CRM.', 'success');
     if (result.crmUrl) { const link = document.querySelector('#crmLink'); link.href = result.crmUrl; link.textContent = 'Open CRM Task'; link.hidden = false; }
     taskForm.reset();
