@@ -6,6 +6,7 @@ body { margin: 0; color: var(--ink); background: linear-gradient(135deg, #e2efe9
 h1 { margin: 0; font-size: 32px; } h2 { font-size: 18px; margin: 28px 0 8px; } .customer { color: var(--muted); margin: 9px 0 0; overflow-wrap: anywhere; }
 form, section, .notice, .shared-fields { margin-top: 24px; padding: 18px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.82); }
 label { display: grid; gap: 6px; margin: 0 0 15px; font-weight: bold; } input, select, textarea { width: 100%; padding: 10px; border: 1px solid #aebbb5; border-radius: 4px; background: white; color: var(--ink); font: 16px Verdana, sans-serif; } textarea { resize: vertical; }
+input[readonly] { background: #f0f4f1; color: var(--muted); }
 .name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .owner, .timezone { margin: 0 0 15px; color: var(--muted); font: 14px Verdana, sans-serif; }
 button { width: 100%; padding: 12px; border: 0; border-radius: 4px; background: var(--accent); color: white; font: 700 15px Verdana, sans-serif; cursor: pointer; } button:disabled { opacity: .6; cursor: wait; }
 .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 24px; }
