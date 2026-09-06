@@ -38,15 +38,14 @@ function showIdentityNotice(text, url = null) {
   const notice = document.querySelector('#identity');
   notice.textContent = '';
   notice.append(document.createTextNode(text));
-  if (url) {
-    notice.append(document.createTextNode(' '));
-    const link = document.createElement('a');
-    link.href = url;
-    link.target = '_blank';
-    link.rel = 'noreferrer';
-    link.textContent = 'Open identity review';
-    notice.append(link);
-  }
+  notice.append(document.createTextNode(' '));
+  const link = document.createElement('a');
+  link.href = url || '#';
+  link.dataset.identityReviewAction = 'true';
+  link.target = '_blank';
+  link.rel = 'noreferrer';
+  link.textContent = 'Create/open identity review';
+  notice.append(link);
   notice.hidden = false;
 }
 
@@ -177,6 +176,18 @@ document.querySelector('#confirmCustomerBtn').addEventListener('click', async ()
     await load();
   } catch (error) { show(error.message, 'error'); }
   finally { button.disabled = false; }
+});
+
+document.querySelector('#identity').addEventListener('click', async (event) => {
+  const link = event.target.closest('[data-identity-review-action]');
+  if (!link) return;
+  event.preventDefault();
+  show('Creating identity review...');
+  try {
+    const result = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/identity-review`), { method: 'POST', headers: { 'content-type': 'application/json' } });
+    show(result.created ? 'Identity review created.' : 'Identity review found.', 'success');
+    if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+  } catch (error) { show(error.message, 'error'); }
 });
 
 callbackForm.addEventListener('submit', async (event) => {

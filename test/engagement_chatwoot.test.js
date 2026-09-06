@@ -98,6 +98,16 @@ test('non-confirmed Chatwoot contexts create a redacted identity review plan', (
   assert.equal(JSON.stringify(review).includes('206-555'), false);
 });
 
+test('Chatwoot conversations without identity keys can still create an actionable review', () => {
+  const context = resolveChatwootConversationContext({ id: 915, meta: { sender: { id: 812, name: 'Jaime Park' } } });
+  const review = buildChatwootIdentityReview(context, { sourceAccountId: '1', sourceUrl: 'https://chat.test/app/accounts/1/conversations/915' });
+  assert.equal(review.sourceSystem, 'Chatwoot');
+  assert.equal(review.externalId, '812');
+  assert.equal(review.name, 'Chatwoot identity review: Jaime Park');
+  assert.equal(review.conflictSummary, 'malformed_or_no_key');
+  assert.equal(review.matchingEvidence.conversationId, '915');
+});
+
 test('confirmed Chatwoot identities cannot create an unnecessary review', () => {
   const context = resolveChatwootConversationContext(conversation, { existingLink: { contactId: 'crm-1' } });
   assert.throws(() => buildChatwootIdentityReview(context, { sourceAccountId: '1' }), /does not require review/i);
