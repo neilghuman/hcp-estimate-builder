@@ -216,8 +216,7 @@ document.querySelector('#parkCustomerBtn').addEventListener('click', async () =>
         agent: currentAgent,
       }),
     });
-    show('Parked for follow-up.', 'success');
-    if (result.review?.url) window.open(result.review.url, '_blank', 'noopener,noreferrer');
+    show('Parked for follow-up. Opening the task...', 'success');
     if (result.taskUrl) window.open(result.taskUrl, '_blank', 'noopener,noreferrer');
   } catch (error) { show(error.message, 'error'); }
   finally { button.disabled = false; }
