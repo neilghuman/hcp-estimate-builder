@@ -58,11 +58,20 @@ async function load() {
   const data = await request(apiPath(`/api/engagement/callback-panel/${conversationId}?${params}`));
   panelData = data;
   document.querySelector('#customer').textContent = [data.customer.name, data.customer.phone, data.customer.email].filter(Boolean).join(' | ') || 'Unnamed customer';
-  if (data.crmUrl) { const link = document.querySelector('#crmLink'); link.href = data.crmUrl; link.hidden = false; }
+  const crmLink = document.querySelector('#crmLink');
+  crmLink.href = '#';
+  crmLink.textContent = 'Open CRM Contact';
+  crmLink.hidden = true;
+  if (data.crmUrl) { crmLink.href = data.crmUrl; crmLink.hidden = false; }
   const firstName = document.querySelector('#firstName');
   const lastName = document.querySelector('#lastName');
+  document.querySelector('#customerNameField').hidden = true;
   firstName.value = data.customer.firstName || '';
   lastName.value = data.customer.lastName || '';
+  firstName.required = false;
+  lastName.required = false;
+  firstName.readOnly = false;
+  lastName.readOnly = false;
   if (data.identity.outcome === 'net_new') {
     document.querySelector('#customerNameField').hidden = false;
     firstName.required = true;
