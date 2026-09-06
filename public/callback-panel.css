@@ -96,6 +96,18 @@ textarea { resize: vertical; min-height: 96px; }
 input[readonly] { background: var(--surface-soft); color: var(--muted); }
 .name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .name-fields label { margin-bottom: 0; }
+.due-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(120px, .95fr); gap: 10px; }
+.quick-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: -2px 0 14px; }
+.quick-times button {
+  min-height: 36px;
+  padding: 7px 8px;
+  border-color: var(--control-border);
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: none;
+}
+.quick-times button:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .owner, .timezone { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 button {
   width: 100%;
@@ -141,4 +153,6 @@ li { margin: 7px 0; color: var(--text); }
   header, form, section, .notice, .shared-fields { border-radius: 12px; padding: 14px; }
   h1 { font-size: 22px; }
   .name-fields { grid-template-columns: 1fr; }
+  .due-grid { grid-template-columns: 1fr; }
+  .quick-times { grid-template-columns: 1fr; }
 }
