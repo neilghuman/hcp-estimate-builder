@@ -30,6 +30,10 @@ function customerFields() {
   return { firstName: document.querySelector('#firstName').value, lastName: document.querySelector('#lastName').value };
 }
 
+function suggestedContactText(contact) {
+  return [contact?.name, contact?.phone, contact?.email].filter(Boolean).join(' | ');
+}
+
 function setTab(tab) {
   activeTab = tab;
   document.querySelectorAll('.tab').forEach((button) => button.classList.toggle('is-active', button.dataset.tab === tab));
@@ -65,6 +69,8 @@ async function load() {
   if (data.crmUrl) { crmLink.href = data.crmUrl; crmLink.hidden = false; }
   const firstName = document.querySelector('#firstName');
   const lastName = document.querySelector('#lastName');
+  const confirmCustomer = document.querySelector('#confirmCustomer');
+  confirmCustomer.hidden = true;
   document.querySelector('#customerNameField').hidden = true;
   firstName.value = data.customer.firstName || '';
   lastName.value = data.customer.lastName || '';
@@ -78,6 +84,10 @@ async function load() {
     lastName.required = true;
     firstName.readOnly = false;
     lastName.readOnly = false;
+  } else if (data.identity.outcome === 'provisional' && data.suggestedContact) {
+    document.querySelector('#confirmText').textContent = `This looks like ${suggestedContactText(data.suggestedContact)}. Link this Chatwoot conversation to that CRM customer to create callbacks or tasks.`;
+    confirmCustomer.hidden = false;
+    return;
   } else if (data.identity.outcome !== 'auto_confirmed') { const notice = document.querySelector('#identity'); notice.textContent = 'Customer identity needs review before a follow-up can be created.'; notice.hidden = false; return; }
   else if (data.customer.firstName || data.customer.lastName) {
     document.querySelector('#customerNameField').hidden = false;
@@ -123,6 +133,19 @@ document.querySelector('#tabs').addEventListener('click', (event) => {
   const button = event.target.closest('[data-tab]');
   if (!button) return;
   setTab(button.dataset.tab);
+});
+
+document.querySelector('#confirmCustomerBtn').addEventListener('click', async () => {
+  const button = document.querySelector('#confirmCustomerBtn');
+  button.disabled = true;
+  show('Linking customer...');
+  try {
+    const result = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/link-customer`), { method: 'POST', headers: { 'content-type': 'application/json' } });
+    show('Customer linked. Loading follow-up tools...', 'success');
+    if (result.crmUrl) { const link = document.querySelector('#crmLink'); link.href = result.crmUrl; link.textContent = 'Open CRM Contact'; link.hidden = false; }
+    await load();
+  } catch (error) { show(error.message, 'error'); }
+  finally { button.disabled = false; }
 });
 
 callbackForm.addEventListener('submit', async (event) => {
