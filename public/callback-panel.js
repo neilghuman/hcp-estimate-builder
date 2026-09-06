@@ -34,6 +34,22 @@ function suggestedContactText(contact) {
   return [contact?.name, contact?.phone, contact?.email].filter(Boolean).join(' | ');
 }
 
+function showIdentityNotice(text, url = null) {
+  const notice = document.querySelector('#identity');
+  notice.textContent = '';
+  notice.append(document.createTextNode(text));
+  if (url) {
+    notice.append(document.createTextNode(' '));
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.textContent = 'Open identity review';
+    notice.append(link);
+  }
+  notice.hidden = false;
+}
+
 function resetPanelState() {
   const crmLink = document.querySelector('#crmLink');
   crmLink.href = '#';
@@ -103,7 +119,7 @@ async function load() {
     document.querySelector('#confirmText').textContent = `This looks like ${suggestedContactText(data.suggestedContact)}. Link this Chatwoot conversation to that CRM customer to create callbacks or tasks.`;
     confirmCustomer.hidden = false;
     return;
-  } else if (data.identity.outcome !== 'auto_confirmed') { const notice = document.querySelector('#identity'); notice.textContent = 'Customer identity needs review before a follow-up can be created.'; notice.hidden = false; return; }
+  } else if (data.identity.outcome !== 'auto_confirmed') { showIdentityNotice('Customer identity needs review before a follow-up can be created.', data.reviewUrl); return; }
   else if (data.customer.firstName || data.customer.lastName) {
     document.querySelector('#customerNameField').hidden = false;
     firstName.required = false;
