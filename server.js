@@ -134,7 +134,8 @@ async function loadCallbackPanelContext(conversationId) {
   const context = resolveChatwootConversationContext(conversation, { contacts, existingLink, defaultCountry: process.env.ENGAGEMENT_DEFAULT_PHONE_COUNTRY || 'US' });
   const callbacks = context.identity.contactId ? activeCallbacks((await callbackStore.list()).filter((callback) => callback.contactId === String(context.identity.contactId))) : [];
   const crmBase = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
-  return { context, conversation, callbacks, crmUrl: context.identity.contactId && crmBase ? `${crmBase}/#Contact/view/${context.identity.contactId}` : null };
+  const crmContact = context.identity.contactId ? contacts.find((contact) => String(contact.id) === String(context.identity.contactId)) : null;
+  return { context, conversation, callbacks, crmContact, crmUrl: context.identity.contactId && crmBase ? `${crmBase}/#Contact/view/${context.identity.contactId}` : null };
 }
 
 async function syncNewCallbackToCrm(callback) {
@@ -540,7 +541,13 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
     const agent = dashboardAgent({ id: req.query.agentId, name: req.query.agentName });
     res.json({
       conversationId: panel.context.conversationId,
-      customer: { name: panel.context.contact.name, phone: panel.context.contact.phone, email: panel.context.contact.email },
+      customer: {
+        name: [panel.crmContact?.firstName, panel.crmContact?.lastName].filter(Boolean).join(' ').trim() || panel.context.contact.name,
+        firstName: panel.crmContact?.firstName || null,
+        lastName: panel.crmContact?.lastName || null,
+        phone: panel.context.contact.phone,
+        email: panel.context.contact.email,
+      },
       identity: panel.context.identity,
       crmUrl: panel.crmUrl,
       callbacks: panel.callbacks,

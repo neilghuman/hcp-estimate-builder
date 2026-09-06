@@ -59,11 +59,24 @@ async function load() {
   panelData = data;
   document.querySelector('#customer').textContent = [data.customer.name, data.customer.phone, data.customer.email].filter(Boolean).join(' | ') || 'Unnamed customer';
   if (data.crmUrl) { const link = document.querySelector('#crmLink'); link.href = data.crmUrl; link.hidden = false; }
+  const firstName = document.querySelector('#firstName');
+  const lastName = document.querySelector('#lastName');
+  firstName.value = data.customer.firstName || '';
+  lastName.value = data.customer.lastName || '';
   if (data.identity.outcome === 'net_new') {
     document.querySelector('#customerNameField').hidden = false;
-    document.querySelector('#firstName').required = true;
-    document.querySelector('#lastName').required = true;
+    firstName.required = true;
+    lastName.required = true;
+    firstName.readOnly = false;
+    lastName.readOnly = false;
   } else if (data.identity.outcome !== 'auto_confirmed') { const notice = document.querySelector('#identity'); notice.textContent = 'Customer identity needs review before a follow-up can be created.'; notice.hidden = false; return; }
+  else if (data.customer.firstName || data.customer.lastName) {
+    document.querySelector('#customerNameField').hidden = false;
+    firstName.required = false;
+    lastName.required = false;
+    firstName.readOnly = true;
+    lastName.readOnly = true;
+  }
   if (!data.callbackWritesEnabled && !data.customerTasksEnabled) { const notice = document.querySelector('#identity'); notice.textContent = 'Customer follow-up tools are temporarily unavailable.'; notice.hidden = false; return; }
   document.querySelector('#tabs').hidden = false;
   document.querySelector('[data-tab="callback"]').hidden = !data.callbackWritesEnabled;
