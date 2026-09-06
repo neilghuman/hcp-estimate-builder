@@ -26,7 +26,7 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes, sweepHcpLiveSync, hcpLiveSyncEnabled, sweepFuzzyDuplicates, fuzzyDedupEnabled } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createMeetingRecord, createTaskRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createExternalIdentityLink, createMeetingRecord, createTaskRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
 import { buildReminderNote, conversationIdFromSource, selectReminderStages } from './src/reminders.js';
@@ -136,6 +136,33 @@ async function loadCallbackPanelContext(conversationId) {
   const crmBase = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
   const crmContact = context.identity.contactId ? contacts.find((contact) => String(contact.id) === String(context.identity.contactId)) : null;
   return { context, conversation, callbacks, crmContact, crmUrl: context.identity.contactId && crmBase ? `${crmBase}/#Contact/view/${context.identity.contactId}` : null };
+}
+
+function chatwootConversationUrl(conversationId) {
+  const chatwootBase = String(process.env.CHAT_FOUNDRY_CHATWOOT_BASE_URL || '').replace(/\/$/, '');
+  const accountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
+  return chatwootBase && accountId ? `${chatwootBase}/app/accounts/${accountId}/conversations/${conversationId}` : null;
+}
+
+async function linkPanelCustomer(panel) {
+  if (!callbackWritesEnabled() && !customerTasksEnabled()) throw Object.assign(new Error('Customer follow-up writes are disabled.'), { status: 403 });
+  const identity = panel.context.identity;
+  if (identity.outcome !== 'provisional' || !identity.contactId) throw Object.assign(new Error(`This conversation cannot be linked automatically (identity: ${identity.outcome || 'unknown'}).`), { status: 409 });
+  const sourceAccountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
+  const externalId = String(panel.context.contact.id);
+  const existing = await findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId, externalId });
+  if (existing) return { contactId: existing.contactId, externalIdentityLinkId: existing.id, existing: true };
+  const link = await createExternalIdentityLink({
+    name: `Chatwoot:${sourceAccountId}:${externalId}`,
+    sourceSystem: 'Chatwoot',
+    sourceAccountId,
+    externalId,
+    contactId: String(identity.contactId),
+    linkStatus: 'Confirmed',
+    matchingEvidence: { source: 'customer-follow-up-panel', conversationId: panel.context.conversationId, match: identity.match || null },
+  });
+  await updateContactChatwootContext(String(identity.contactId), { chatwootAccountId: sourceAccountId, chatwootContactId: externalId, chatwootUrl: chatwootConversationUrl(panel.context.conversationId) });
+  return { contactId: String(identity.contactId), externalIdentityLinkId: link.id, existing: false };
 }
 
 async function syncNewCallbackToCrm(callback) {
@@ -550,6 +577,13 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
       },
       identity: panel.context.identity,
       crmUrl: panel.crmUrl,
+      suggestedContact: panel.context.identity.outcome === 'provisional' && panel.crmContact ? {
+        id: panel.crmContact.id,
+        name: [panel.crmContact.firstName, panel.crmContact.lastName].filter(Boolean).join(' ').trim(),
+        phone: panel.crmContact.phoneNumber || null,
+        email: panel.crmContact.emailAddress || null,
+        crmUrl: panel.crmUrl,
+      } : null,
       callbacks: panel.callbacks,
       callbackWritesEnabled: callbackWritesEnabled(),
       customerTasksEnabled: customerTasksEnabled(),
@@ -559,6 +593,19 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
     });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/engagement/callback-panel/:conversationId/link-customer', async (req, res) => {
+  const conversationId = String(req.params.conversationId || '').trim();
+  if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+  try {
+    const panel = await loadCallbackPanelContext(conversationId);
+    const result = await linkPanelCustomer(panel);
+    const crmBase = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
+    res.status(result.existing ? 200 : 201).json({ ...result, crmUrl: crmBase ? `${crmBase}/#Contact/view/${result.contactId}` : null });
+  } catch (error) {
+    res.status(error.status || 400).json({ error: error.message });
   }
 });
 
