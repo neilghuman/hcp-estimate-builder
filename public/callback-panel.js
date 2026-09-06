@@ -80,6 +80,7 @@ async function load() {
   const data = await request(apiPath(`/api/engagement/callback-panel/${conversationId}?${params}`));
   panelData = data;
   resetPanelState();
+  show('');
   document.querySelector('#customer').textContent = [data.customer.name, data.customer.phone, data.customer.email].filter(Boolean).join(' | ') || 'Unnamed customer';
   const crmLink = document.querySelector('#crmLink');
   if (data.crmUrl) { crmLink.href = data.crmUrl; crmLink.hidden = false; }
