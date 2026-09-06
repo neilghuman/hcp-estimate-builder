@@ -17,6 +17,15 @@
       <p id="confirmText" class="confirm-text"></p>
       <button id="confirmCustomerBtn" type="button">Link this CRM customer</button>
     </section>
+    <section id="parkCustomer" class="confirm-card" hidden>
+      <h2>Park for later</h2>
+      <p id="parkText" class="confirm-text"></p>
+      <label>Task title<input id="parkTaskTitle" name="parkTaskTitle" placeholder="Identify customer and follow up" /></label>
+      <label>Due date and time<input id="parkDueAt" name="parkDueAt" type="datetime-local" /></label>
+      <p class="timezone">Pacific time</p>
+      <label>Notes<textarea id="parkTaskDetails" name="parkTaskDetails" rows="3" placeholder="What do you need to research before following up?"></textarea></label>
+      <button id="parkCustomerBtn" type="button">Park for later</button>
+    </section>
     <section id="openCallbacks" hidden><h2>Open callbacks</h2><ul id="callbackList"></ul></section>
     <div id="customerNameField" class="name-fields shared-fields" hidden>
       <label>First name<input id="firstName" name="firstName" autocomplete="given-name" /></label>
@@ -43,6 +52,6 @@
     </form>
     <p id="message" class="message" role="status"></p>
   </main>
-  <script src="callback-panel.js?v=6"></script>
+  <script src="callback-panel.js?v=7"></script>
 </body>
 </html>
