@@ -175,6 +175,24 @@ async function ensurePanelIdentityReview(panel) {
   return { id: inserted.id, created: true, url: crmBase ? `${crmBase}/#IdentityReview/view/${inserted.id}` : null };
 }
 
+async function parkPanelCustomer(panel, { agent = null, taskTitle = null, taskDetails = null, dueAt = null } = {}) {
+  if (!customerTasksEnabled()) throw Object.assign(new Error('ENGAGEMENT_CUSTOMER_TASKS_ENABLED is off.'), { status: 403 });
+  if (panel.context.identity.outcome === 'auto_confirmed') throw Object.assign(new Error('This customer is already confirmed.'), { status: 409 });
+  const review = await ensurePanelIdentityReview(panel);
+  const owner = dashboardAgent(agent);
+  const assignedUserId = await resolveOwnerUserId(owner.name, owner);
+  const due = dueAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const name = String(taskTitle || '').trim() || `Identify customer: ${panel.context.contact.name || panel.context.contact.phone || panel.context.contact.email || `Chatwoot ${panel.context.contact.id}`}`;
+  const description = [
+    String(taskDetails || '').trim() || 'Identify or create the CRM customer, then complete the follow-up.',
+    `IdentityReview: ${review.url || review.id}`,
+    `Chatwoot: ${chatwootConversationUrl(panel.context.conversationId) || panel.context.conversationId}`,
+  ].filter(Boolean).join('\n\n');
+  const task = await createTaskRecord({ name, dateEnd: due, assignedUserId, description });
+  const crmBase = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
+  return { review, task, taskUrl: crmBase ? `${crmBase}/#Task/view/${task.id}` : null };
+}
+
 async function linkPanelCustomer(panel) {
   if (!callbackWritesEnabled() && !customerTasksEnabled()) throw Object.assign(new Error('Customer follow-up writes are disabled.'), { status: 403 });
   const identity = panel.context.identity;
@@ -651,6 +669,18 @@ app.post('/api/engagement/callback-panel/:conversationId/identity-review', async
     if (panel.context.identity.outcome === 'auto_confirmed') return res.status(409).json({ error: 'This customer is already confirmed.' });
     const result = await ensurePanelIdentityReview(panel);
     res.status(result.created ? 201 : 200).json(result);
+  } catch (error) {
+    res.status(error.status || 400).json({ error: error.message });
+  }
+});
+
+app.post('/api/engagement/callback-panel/:conversationId/park', async (req, res) => {
+  const conversationId = String(req.params.conversationId || '').trim();
+  if (!/^\d+$/.test(conversationId)) return res.status(400).json({ error: 'A numeric Chatwoot conversation ID is required.' });
+  try {
+    const panel = await loadCallbackPanelContext(conversationId);
+    const result = await parkPanelCustomer(panel, { agent: req.body?.agent, taskTitle: req.body?.taskTitle, taskDetails: req.body?.taskDetails, dueAt: req.body?.dueAt });
+    res.status(result.review.created ? 201 : 200).json(result);
   } catch (error) {
     res.status(error.status || 400).json({ error: error.message });
   }

@@ -56,6 +56,7 @@ function resetPanelState() {
   crmLink.hidden = true;
   document.querySelector('#identity').hidden = true;
   document.querySelector('#confirmCustomer').hidden = true;
+  document.querySelector('#parkCustomer').hidden = true;
   document.querySelector('#openCallbacks').hidden = true;
   document.querySelector('#callbackList').innerHTML = '';
   document.querySelector('#customerNameField').hidden = true;
@@ -65,6 +66,10 @@ function resetPanelState() {
   document.querySelector('#owner').hidden = true;
   document.querySelector('#taskOwner').hidden = true;
   document.querySelector('#callBtn').hidden = true;
+}
+
+function defaultParkTitle(data) {
+  return `Identify customer: ${data.customer.name || data.customer.phone || data.customer.email || 'Chatwoot conversation'}`;
 }
 
 function setTab(tab) {
@@ -118,7 +123,13 @@ async function load() {
     document.querySelector('#confirmText').textContent = `This looks like ${suggestedContactText(data.suggestedContact)}. Link this Chatwoot conversation to that CRM customer to create callbacks or tasks.`;
     confirmCustomer.hidden = false;
     return;
-  } else if (data.identity.outcome !== 'auto_confirmed') { showIdentityNotice('Customer identity needs review before a follow-up can be created.', data.reviewUrl); return; }
+  } else if (data.identity.outcome !== 'auto_confirmed') {
+    showIdentityNotice('Customer identity needs review before a follow-up can be created.', data.reviewUrl);
+    document.querySelector('#parkText').textContent = 'Park this conversation as an identity review plus a task so it stays in your follow-up queue without creating a Contact yet.';
+    document.querySelector('#parkTaskTitle').value = defaultParkTitle(data);
+    document.querySelector('#parkCustomer').hidden = false;
+    return;
+  }
   else if (data.customer.firstName || data.customer.lastName) {
     document.querySelector('#customerNameField').hidden = false;
     firstName.required = false;
@@ -188,6 +199,28 @@ document.querySelector('#identity').addEventListener('click', async (event) => {
     show(result.created ? 'Identity review created.' : 'Identity review found.', 'success');
     if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
   } catch (error) { show(error.message, 'error'); }
+});
+
+document.querySelector('#parkCustomerBtn').addEventListener('click', async () => {
+  const button = document.querySelector('#parkCustomerBtn');
+  button.disabled = true;
+  show('Parking follow-up...');
+  try {
+    const result = await request(apiPath(`/api/engagement/callback-panel/${conversationId}/park`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        taskTitle: document.querySelector('#parkTaskTitle').value,
+        dueAt: document.querySelector('#parkDueAt').value,
+        taskDetails: document.querySelector('#parkTaskDetails').value,
+        agent: currentAgent,
+      }),
+    });
+    show('Parked for follow-up.', 'success');
+    if (result.review?.url) window.open(result.review.url, '_blank', 'noopener,noreferrer');
+    if (result.taskUrl) window.open(result.taskUrl, '_blank', 'noopener,noreferrer');
+  } catch (error) { show(error.message, 'error'); }
+  finally { button.disabled = false; }
 });
 
 callbackForm.addEventListener('submit', async (event) => {
