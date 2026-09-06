@@ -34,6 +34,24 @@ function suggestedContactText(contact) {
   return [contact?.name, contact?.phone, contact?.email].filter(Boolean).join(' | ');
 }
 
+function resetPanelState() {
+  const crmLink = document.querySelector('#crmLink');
+  crmLink.href = '#';
+  crmLink.textContent = 'Open CRM Contact';
+  crmLink.hidden = true;
+  document.querySelector('#identity').hidden = true;
+  document.querySelector('#confirmCustomer').hidden = true;
+  document.querySelector('#openCallbacks').hidden = true;
+  document.querySelector('#callbackList').innerHTML = '';
+  document.querySelector('#customerNameField').hidden = true;
+  document.querySelector('#tabs').hidden = true;
+  callbackForm.hidden = true;
+  taskForm.hidden = true;
+  document.querySelector('#owner').hidden = true;
+  document.querySelector('#taskOwner').hidden = true;
+  document.querySelector('#callBtn').hidden = true;
+}
+
 function setTab(tab) {
   activeTab = tab;
   document.querySelectorAll('.tab').forEach((button) => button.classList.toggle('is-active', button.dataset.tab === tab));
@@ -61,17 +79,13 @@ async function load() {
   const params = new URLSearchParams({ agentId: currentAgent.id, agentName: currentAgent.name || currentAgent.email });
   const data = await request(apiPath(`/api/engagement/callback-panel/${conversationId}?${params}`));
   panelData = data;
+  resetPanelState();
   document.querySelector('#customer').textContent = [data.customer.name, data.customer.phone, data.customer.email].filter(Boolean).join(' | ') || 'Unnamed customer';
   const crmLink = document.querySelector('#crmLink');
-  crmLink.href = '#';
-  crmLink.textContent = 'Open CRM Contact';
-  crmLink.hidden = true;
   if (data.crmUrl) { crmLink.href = data.crmUrl; crmLink.hidden = false; }
   const firstName = document.querySelector('#firstName');
   const lastName = document.querySelector('#lastName');
   const confirmCustomer = document.querySelector('#confirmCustomer');
-  confirmCustomer.hidden = true;
-  document.querySelector('#customerNameField').hidden = true;
   firstName.value = data.customer.firstName || '';
   lastName.value = data.customer.lastName || '';
   firstName.required = false;
