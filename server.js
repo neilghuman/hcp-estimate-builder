@@ -26,7 +26,7 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes, sweepHcpLiveSync, hcpLiveSyncEnabled, sweepFuzzyDuplicates, fuzzyDedupEnabled } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createExternalIdentityLink, createMeetingRecord, createTaskRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createExternalIdentityLink, createMeetingRecord, createTaskRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findOpenIdentityReview, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
 import { buildReminderNote, conversationIdFromSource, selectReminderStages } from './src/reminders.js';
@@ -145,6 +145,21 @@ function chatwootConversationUrl(conversationId) {
   const chatwootBase = String(process.env.CHAT_FOUNDRY_CHATWOOT_BASE_URL || '').replace(/\/$/, '');
   const accountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
   return chatwootBase && accountId ? `${chatwootBase}/app/accounts/${accountId}/conversations/${conversationId}` : null;
+}
+
+async function panelIdentityReviewUrl(panel) {
+  const crmBase = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
+  if (!crmBase) return null;
+  const sourceAccountId = String(process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID || '').trim();
+  const externalId = String(panel?.context?.contact?.id || '').trim();
+  if (!sourceAccountId || !externalId) return `${crmBase}/#IdentityReview`;
+  try {
+    const review = await findOpenIdentityReview({ sourceSystem: 'Chatwoot', sourceAccountId, externalId });
+    if (review?.id) return `${crmBase}/#IdentityReview/view/${review.id}`;
+  } catch (error) {
+    console.warn('[CALLBACK_PANEL_REVIEW_LOOKUP_FAILED]', error.message);
+  }
+  return `${crmBase}/#IdentityReview`;
 }
 
 async function linkPanelCustomer(panel) {
@@ -570,6 +585,7 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
     const panel = await loadCallbackPanelContext(conversationId);
     const agent = dashboardAgent({ id: req.query.agentId, name: req.query.agentName });
     const confirmed = panel.context.identity.outcome === 'auto_confirmed';
+    const reviewUrl = !confirmed && panel.context.identity.outcome !== 'net_new' && !(panel.context.identity.outcome === 'provisional' && panel.crmContact) ? await panelIdentityReviewUrl(panel) : null;
     res.json({
       conversationId: panel.context.conversationId,
       customer: {
@@ -581,6 +597,7 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
       },
       identity: panel.context.identity,
       crmUrl: panel.crmUrl,
+      reviewUrl,
       suggestedContact: panel.context.identity.outcome === 'provisional' && panel.crmContact ? {
         id: panel.crmContact.id,
         name: [panel.crmContact.firstName, panel.crmContact.lastName].filter(Boolean).join(' ').trim(),
