@@ -96,11 +96,12 @@ export function buildChatwootIdentityReview(context, { sourceAccountId, sourceUr
   if (!accountId) throw Object.assign(new Error('CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID is not configured.'), { status: 503 });
   if (!context?.contact?.id || !context?.identity) throw Object.assign(new Error('A resolved Chatwoot context is required.'), { status: 422 });
   const outcome = context.identity.outcome;
-  if (!['provisional', 'identity_review', 'field_conflict', 'net_new'].includes(outcome)) {
+  if (!['provisional', 'identity_review', 'field_conflict', 'net_new', 'malformed_or_no_key'].includes(outcome)) {
     throw Object.assign(new Error(`Chatwoot identity outcome ${outcome || 'unknown'} does not require review.`), { status: 409 });
   }
+  const displayName = text(context.contact.name) || `${accountId}:${context.contact.id}`;
   return {
-    name: `Chatwoot identity review: ${accountId}:${context.contact.id}`,
+    name: `Chatwoot identity review: ${displayName}`,
     sourceSystem: 'Chatwoot',
     sourceAccountId: accountId,
     externalId: String(context.contact.id),
