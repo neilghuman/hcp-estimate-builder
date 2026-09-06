@@ -26,7 +26,7 @@ import { startDripSweep } from './src/drip_sweep.js';
 import * as dripChatwoot from './src/chatwoot.js';
 import { registerEngagementRoutes, sweepHcpLiveSync, hcpLiveSyncEnabled, sweepFuzzyDuplicates, fuzzyDedupEnabled } from './src/engagement_routes.js';
 import { buildCallbackCommandCenter, createCallbackStore, createPersistedCallbackStore, scheduleCallback } from './src/callbacks.js';
-import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createExternalIdentityLink, createMeetingRecord, createTaskRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findOpenIdentityReview, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
+import { createCallbackRecord, createCallRecord, createCanaryContactAndLink, createExternalIdentityLink, createIdentityReview, createMeetingRecord, createTaskRecord, deleteMeetingRecord, findExternalIdentityLinkByExternalId, findOpenIdentityReview, findUserIdByEmail, listContactsForReconciliation, updateCallbackRecord, updateContactChatwootContext, updateMeetingRecord } from './src/engagement_espocrm.js';
 import { buildChatwootIdentityReview, resolveChatwootConversationContext } from './src/engagement_chatwoot.js';
 import { chatwootConfigured, getConversation, listAgents, postPrivateNote, setConversationLabels } from './src/chatwoot.js';
 import { buildReminderNote, conversationIdFromSource, selectReminderStages } from './src/reminders.js';
