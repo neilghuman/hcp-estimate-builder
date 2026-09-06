@@ -132,10 +132,13 @@ async function loadCallbackPanelContext(conversationId) {
     findExternalIdentityLinkByExternalId({ sourceSystem: 'Chatwoot', sourceAccountId: process.env.CHAT_FOUNDRY_CHATWOOT_ACCOUNT_ID, externalId: String(chatwootContactId) }),
   ]);
   const context = resolveChatwootConversationContext(conversation, { contacts, existingLink, defaultCountry: process.env.ENGAGEMENT_DEFAULT_PHONE_COUNTRY || 'US' });
-  const callbacks = context.identity.contactId ? activeCallbacks((await callbackStore.list()).filter((callback) => callback.contactId === String(context.identity.contactId))) : [];
+  const confirmedContactId = context.identity.outcome === 'auto_confirmed' ? context.identity.contactId : null;
+  const callbacks = confirmedContactId ? activeCallbacks((await callbackStore.list()).filter((callback) => callback.contactId === String(confirmedContactId))) : [];
   const crmBase = String(process.env.ENGAGEMENT_ESPOCRM_BASE_URL || '').replace(/\/$/, '');
   const crmContact = context.identity.contactId ? contacts.find((contact) => String(contact.id) === String(context.identity.contactId)) : null;
-  return { context, conversation, callbacks, crmContact, crmUrl: context.identity.contactId && crmBase ? `${crmBase}/#Contact/view/${context.identity.contactId}` : null };
+  const crmUrl = confirmedContactId && crmBase ? `${crmBase}/#Contact/view/${confirmedContactId}` : null;
+  const candidateCrmUrl = context.identity.contactId && crmBase ? `${crmBase}/#Contact/view/${context.identity.contactId}` : null;
+  return { context, conversation, callbacks, crmContact, crmUrl, candidateCrmUrl };
 }
 
 function chatwootConversationUrl(conversationId) {
@@ -566,12 +569,13 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
   try {
     const panel = await loadCallbackPanelContext(conversationId);
     const agent = dashboardAgent({ id: req.query.agentId, name: req.query.agentName });
+    const confirmed = panel.context.identity.outcome === 'auto_confirmed';
     res.json({
       conversationId: panel.context.conversationId,
       customer: {
-        name: [panel.crmContact?.firstName, panel.crmContact?.lastName].filter(Boolean).join(' ').trim() || panel.context.contact.name,
-        firstName: panel.crmContact?.firstName || null,
-        lastName: panel.crmContact?.lastName || null,
+        name: confirmed ? ([panel.crmContact?.firstName, panel.crmContact?.lastName].filter(Boolean).join(' ').trim() || panel.context.contact.name) : panel.context.contact.name,
+        firstName: confirmed ? (panel.crmContact?.firstName || null) : null,
+        lastName: confirmed ? (panel.crmContact?.lastName || null) : null,
         phone: panel.context.contact.phone,
         email: panel.context.contact.email,
       },
@@ -582,7 +586,7 @@ app.get('/api/engagement/callback-panel/:conversationId', async (req, res) => {
         name: [panel.crmContact.firstName, panel.crmContact.lastName].filter(Boolean).join(' ').trim(),
         phone: panel.crmContact.phoneNumber || null,
         email: panel.crmContact.emailAddress || null,
-        crmUrl: panel.crmUrl,
+        crmUrl: panel.candidateCrmUrl,
       } : null,
       callbacks: panel.callbacks,
       callbackWritesEnabled: callbackWritesEnabled(),
