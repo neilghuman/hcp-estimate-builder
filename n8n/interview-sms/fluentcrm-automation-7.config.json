@@ -1,0 +1,75 @@
+{
+  "id": 7,
+  "title": "Trigger after candidate import - remove tag to execute",
+  "status": "published",
+  "trigger_name": "fluentcrm_contact_removed_from_tags",
+  "settings": {
+    "tags": [
+      "1"
+    ],
+    "select_type": "any",
+    "__force_run_actions": "yes"
+  },
+  "conditions": {
+    "run_multiple": "no"
+  },
+  "steps": [
+    {
+      "id": 20,
+      "action_name": "fluentcrm_wait_times",
+      "settings": {
+        "wait_type": "unit_wait",
+        "wait_time_amount": 1,
+        "wait_time_unit": "minutes",
+        "is_timestamp_wait": "",
+        "wait_date_time": "",
+        "to_day": [],
+        "to_day_time": ""
+      }
+    },
+    {
+      "id": 21,
+      "action_name": "send_custom_email",
+      "settings": {
+        "reference_campaign": 20
+      }
+    },
+    {
+      "id": 22,
+      "action_name": "fluentcrm_wait_times",
+      "settings": {
+        "wait_type": "unit_wait",
+        "wait_time_amount": 2,
+        "wait_time_unit": "minutes",
+        "is_timestamp_wait": "",
+        "wait_date_time": "",
+        "to_day": [],
+        "to_day_time": ""
+      }
+    },
+    {
+      "id": 23,
+      "action_name": "http_send_data",
+      "settings": {
+        "sending_method": "POST",
+        "run_on_background": "yes",
+        "remote_url": "https://auto.unitedservicesnorthwest.com/webhook/b9e2849c-77df-471c-bf28-2db137eb4cdd",
+        "body_data_type": "subscriber_data",
+        "request_format": "json",
+        "body_data_values": [
+          {
+            "data_key": "",
+            "data_value": ""
+          }
+        ],
+        "header_type": "with_headers",
+        "header_data": [
+          {
+            "data_key": "x-webhook-secret",
+            "data_value": "REDACTED_SECRET"
+          }
+        ]
+      }
+    }
+  ]
+}
