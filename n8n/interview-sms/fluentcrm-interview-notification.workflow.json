@@ -1,0 +1,331 @@
+{
+  "id": "xqhebYkB9RAkM3QV",
+  "name": "Fluent CRM Interview SMS Sent Notification",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "b9e2849c-77df-471c-bf28-2db137eb4cdd",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -400,
+        0
+      ],
+      "id": "b219b174-5704-4f1f-b072-39eb7172ddb4",
+      "name": "Webhook",
+      "webhookId": "b9e2849c-77df-471c-bf28-2db137eb4cdd",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ba17436e-2cb2-40a6-a73c-e542dc28ab67",
+              "name": "body.first_name",
+              "value": "={{ $json.body.first_name }}",
+              "type": "string"
+            },
+            {
+              "id": "0197bd92-ccda-402b-8c14-d83a495cd244",
+              "name": "body.phone",
+              "value": "=<TEST_RECIPIENT_E164>",
+              "type": "string"
+            },
+            {
+              "id": "02400639-7fc5-46b0-9012-ee3c24564347",
+              "name": "body.custom_field.position_applied_for",
+              "value": "={{ $json.body.custom_field.position_applied_for }}",
+              "type": "string"
+            },
+            {
+              "id": "9d5a4ed9-b383-4334-9d53-79768e8f5e8e",
+              "name": "body.timezone",
+              "value": "={{ $json.body.timezone }}",
+              "type": "string"
+            },
+            {
+              "id": "d3e3c12a-88d2-4349-92c8-af5f2e75550b",
+              "name": "message",
+              "value": "={{ `Hi ${$json.body.first_name || 'there'}, thank you for applying for the ${$json.body.custom_field.position_applied_for || 'open'} position at United Services Northwest. Please schedule your Zoom interview here: https://www.unitedservicesnorthwest.com/schedule-your-phone-interview/\\n\\nWe’ve also sent this link to your email. We look forward to speaking with you!` }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -144,
+        0
+      ],
+      "id": "846d9c7a-5c77-48e8-a901-556db3740fa3",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6a91fa25-42a7-4d77-a735-622d86f039bc",
+              "leftValue": "={{ $json.body.phone }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        496,
+        0
+      ],
+      "id": "bf16eeb9-2913-45ee-9b2e-29db4ceb977b",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "NqlHzbo0Sj5Bqq9S",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": {}
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        752,
+        -16
+      ],
+      "id": "9fc9df1d-7082-4ba3-807c-e1d11afd422f",
+      "name": "Send via Chatwoot",
+      "notes": "Creates a public outgoing message in Chatwoot inbox 17. The existing Construction relay sends it via Telnyx from +14253908500. Completion means submitted to Chatwoot, not carrier-delivered.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.30.28:8080/api/v2/tables/mmlyccgqcp393me/records",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xc-token",
+              "value": "REDACTED_SECRET"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phone\": \"{{ $json.data.to[0] }}\",\n  \"message\": \"{{ $json.data.text }}\",\n  \"direction\": \"{{ $json.data.direction }}\",\n  \"status\": \"{{ $json.data.status }}\",\n  \"timestamp\": \"{{$now}}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        -16
+      ],
+      "id": "0e0f6cf0-7a38-4a0b-8b9d-d8b259283a8b",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\n\nconst phone =\n  item.json.body?.phone ||\n  item.json.phone ||\n  item.json.body?.booking?.phone ||\n  '';\n\nconst message =\n  item.json.message ||\n  item.json.sms_message ||\n  '';\n\nconst tz =\n  item.json.body?.custom_field?.timezone ||\n  item.json.person_time_zone ||\n  item.json.body?.booking?.person_time_zone ||\n  'America/Los_Angeles';\n\n// texting window\nconst startHour = 9;   // 9:00 AM\nconst endHour = 19;    // 7:00 PM\n\nconst now = new Date();\n\nconst parts = new Intl.DateTimeFormat('en-US', {\n  timeZone: tz,\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n  hour: '2-digit',\n  minute: '2-digit',\n  hour12: false,\n}).formatToParts(now);\n\nconst get = (type) => parts.find(p => p.type === type)?.value;\n\nlet year = Number(get('year'));\nlet month = Number(get('month'));\nlet day = Number(get('day'));\nconst hour = Number(get('hour'));\n\nconst sendNow = !!phone && hour >= startHour && hour < endHour;\n\nfunction pad(n) {\n  return String(n).padStart(2, '0');\n}\n\nlet sendAtLocal = null;\n\nif (!sendNow) {\n  if (hour >= endHour) {\n    const temp = new Date(now.toLocaleString('en-US', { timeZone: tz }));\n    temp.setDate(temp.getDate() + 1);\n    year = temp.getFullYear();\n    month = temp.getMonth() + 1;\n    day = temp.getDate();\n  }\n\n  sendAtLocal = `${year}-${pad(month)}-${pad(day)} ${pad(startHour)}:00:00`;\n}\n\nitem.json.phone = phone;\nitem.json.message = message;\nitem.json.timezone = tz;\nitem.json.send_now = sendNow;\nitem.json.send_at_local = sendAtLocal;\n\nreturn [item];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        0
+      ],
+      "id": "f772f923-d7a1-4346-a356-2bb0a59e3bdb",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "84fc0818-f4e3-49d7-ba8b-8179d50c58ca",
+              "leftValue": "={{ $json.send_now}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        272,
+        0
+      ],
+      "id": "c3169e55-93c0-4225-a785-d809bac0eaa1",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.30.28:8080/api/v2/tables/mp32w3zd4mbbamv/records",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xc-token",
+              "value": "REDACTED_SECRET"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phone\": \"{{ $json.phone }}\",\n  \"message\": \"{{ $json.message }}\",\n  \"send_at_local\": \"{{ $json.send_at_local }}\",\n  \"timezone\": \"{{ $json.timezone }}\",\n  \"sent\": false\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        432,
+        208
+      ],
+      "id": "4df75396-c1f9-411d-81a1-7743db957b72",
+      "name": "Sent to Queue Sender"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send via Chatwoot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sent to Queue Sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via Chatwoot": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "PTBddlVqavzBTDUZ",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

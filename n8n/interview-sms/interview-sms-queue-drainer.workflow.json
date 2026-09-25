@@ -1,0 +1,167 @@
+{
+  "id": "MeXAMbO5QBDdOAf1",
+  "name": "Interview SMS Queue Drainer",
+  "active": true,
+  "nodes": [
+    {
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "name": "Every 15 min",
+      "id": "sched",
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Fetch Queue",
+      "id": "get",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xc-token",
+              "value": "REDACTED_SECRET"
+            }
+          ]
+        },
+        "url": "http://10.0.30.28:8080/api/v2/tables/mp32w3zd4mbbamv/records?where=(sent,eq,false)&limit=200",
+        "sendHeaders": true
+      }
+    },
+    {
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "type": "n8n-nodes-base.code",
+      "name": "Due Filter",
+      "id": "filter",
+      "parameters": {
+        "jsCode": "const now=new Date();const rows=$input.first().json.list||[];const due=[];for(const r of rows){let p=String(r.phone||'').replace(/[^\\d+]/g,'');if(!p)continue;if(!p.startsWith('+')){if(p.length===10)p='+1'+p;else if(p.length===11&&p.startsWith('1'))p='+'+p;}const s=r.send_at_local?new Date(r.send_at_local.replace(' ','T')):now;if(s<=now)due.push({json:{Id:r.Id,phone:p,message:r.message}});}return due;"
+      }
+    },
+    {
+      "typeVersion": 1.3,
+      "position": [
+        660,
+        0
+      ],
+      "type": "n8n-nodes-base.executeWorkflow",
+      "name": "Send via Chatwoot",
+      "id": "tx",
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "NqlHzbo0Sj5Bqq9S",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "passThrough",
+          "value": {}
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "notes": "Creates a public outgoing message in Chatwoot inbox 17. The existing Construction relay sends it via Telnyx from +14253908500. Completion means submitted to Chatwoot, not carrier-delivered.",
+      "notesInFlow": true
+    },
+    {
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "name": "Mark Sent",
+      "id": "patch",
+      "parameters": {
+        "specifyBody": "json",
+        "sendBody": true,
+        "jsonBody": "={\n  \"Id\": {{ $json.Id }},\n  \"sent\": true,\n  \"sent_at\": \"{{ $now }}\"\n}",
+        "method": "PATCH",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xc-token",
+              "value": "REDACTED_SECRET"
+            }
+          ]
+        },
+        "url": "http://10.0.30.28:8080/api/v2/tables/mp32w3zd4mbbamv/records"
+      }
+    }
+  ],
+  "connections": {
+    "Fetch Queue": {
+      "main": [
+        [
+          {
+            "node": "Due Filter",
+            "index": 0,
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Due Filter": {
+      "main": [
+        [
+          {
+            "node": "Send via Chatwoot",
+            "index": 0,
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Fetch Queue",
+            "index": 0,
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Send via Chatwoot": {
+      "main": [
+        [
+          {
+            "node": "Mark Sent",
+            "index": 0,
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

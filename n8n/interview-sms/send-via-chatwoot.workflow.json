@@ -1,0 +1,900 @@
+{
+  "id": "NqlHzbo0Sj5Bqq9S",
+  "name": "Interview SMS: Send via Chatwoot",
+  "active": true,
+  "nodes": [
+    {
+      "id": "63ca2c42-d6c7-4080-9a91-a38ecbd45754",
+      "name": "Interview SMS Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "eebc1c81-b8da-41aa-9fd9-e987769c90e6",
+      "name": "Prepare Interview Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const source = $json;\nlet phone = String(source.body?.phone || source.phone || '').replace(/[^\\d+]/g, '');\nif (/^\\d{10}$/.test(phone)) phone = '+1' + phone;\nelse if (/^1\\d{10}$/.test(phone)) phone = '+' + phone;\nif (!/^\\+[1-9]\\d{7,14}$/.test(phone)) throw new Error('Interview SMS requires a valid phone number');\nconst content = String(source.message || source.sms_message || '').trim();\nif (!content) throw new Error('Interview SMS content is empty');\nconst name = [source.body?.first_name, source.body?.last_name].filter(Boolean).join(' ') || phone;\nreturn {json:{phone,content,name,inbox_id:17,queue_id:source.Id ?? null}};"
+      }
+    },
+    {
+      "id": "7f9439e0-f011-48db-b3f0-26b7e321247f",
+      "name": "CW Find Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/contacts/filter",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({payload:[{attribute_key:'phone_number',filter_operator:'equal_to',values:[$('Prepare Interview Message').first().json.phone],query_operator:null}]}) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "5fcdfe61-5350-4fa5-8d35-afa73beb1058",
+      "name": "Contact Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5c111e8d-1646-4610-9015-d1eadf9ed4bb",
+              "leftValue": "={{ ($json.payload || []).length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "fd86ba8e-65e5-46db-8db8-611662512e3a",
+      "name": "Existing Contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const c=$json.payload[0];\nconst inbox=$('Prepare Interview Message').first().json.inbox_id;\nconst ci=(c.contact_inboxes||[]).find(x=>Number(x.inbox?.id ?? x.inbox_id)===inbox);\nreturn {json:{contact_id:c.id,source_id:ci?.source_id || null}};"
+      }
+    },
+    {
+      "id": "4daafdeb-2ffe-461b-8d4b-c4317d9c0b40",
+      "name": "Inbox Linked",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bc74fe63-7348-4485-96dd-7c22292352d4",
+              "leftValue": "={{ !!$json.source_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "26c17eb1-332c-431e-9e3b-1a6fbc3bc2bf",
+      "name": "CW Link Inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/contacts/{{ $json.contact_id }}/contact_inboxes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({inbox_id:17}) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "8e37dd3a-aae6-4f06-9e75-8d81f84d9195",
+      "name": "Linked Contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -80
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j=$json.payload || $json;\nconst source=j.source_id || j.contact_inbox?.source_id;\nif(!source) throw new Error('Chatwoot did not return the contact inbox source ID');\nreturn {json:{contact_id:$('Existing Contact').first().json.contact_id,source_id:source}};"
+      }
+    },
+    {
+      "id": "2f6bda0a-60da-4e4d-83c6-a4ed319f5174",
+      "name": "CW Create Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({inbox_id:17,name:$('Prepare Interview Message').first().json.name,phone_number:$('Prepare Interview Message').first().json.phone}) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "20d84808-3cc0-40db-88a3-6a7095ad3d0a",
+      "name": "Created Contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const c=$json.payload?.contact || $json.contact || $json.payload || $json;\nconst ci=(c.contact_inboxes||[]).find(x=>Number(x.inbox?.id ?? x.inbox_id)===17);\nif(!c.id || !ci?.source_id) throw new Error('Chatwoot contact creation did not return inbox 17 source ID');\nreturn {json:{contact_id:c.id,source_id:ci.source_id}};"
+      }
+    },
+    {
+      "id": "21403f4a-1ceb-4f99-b2f1-57c080d59516",
+      "name": "Contact Ready",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {json:$json};"
+      }
+    },
+    {
+      "id": "f92506e2-9618-473c-9cee-284f508d801f",
+      "name": "CW List Conversations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/contacts/{{ $json.contact_id }}/conversations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "8dfce58a-783d-4487-802a-d521534dacbf",
+      "name": "Resolve Conversation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const list=Array.isArray($json.payload)?$json.payload:[];\nconst match=list.filter(c=>Number(c.inbox_id)===17).sort((a,b)=>Number(b.id)-Number(a.id))[0];\nreturn {json:{...$('Contact Ready').first().json,conv_id:match?.id || null,status:match?.status || null}};"
+      }
+    },
+    {
+      "id": "f01db0ce-43af-4692-b6fe-57b6ef3a5694",
+      "name": "Conversation Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8b46979e-a900-4e63-a792-d70aff12f183",
+              "leftValue": "={{ !!$json.conv_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "21b60c3b-0147-4179-8096-51c576a1dd57",
+      "name": "Conversation Open",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2880,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3c2ba650-f695-489d-b649-bb8aa56ffa5f",
+              "leftValue": "={{ $json.status === 'open' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c39c68f0-1dfb-4eca-9d1e-9c401fced517",
+      "name": "CW Reopen Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/conversations/{{ $json.conv_id }}/toggle_status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "{\"status\":\"open\"}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "01b1d276-65e0-47b6-b60b-4bf6e723b1ad",
+      "name": "Existing Conversation Ready",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        -160
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {json:{conv_id:$('Resolve Conversation').first().json.conv_id}};"
+      }
+    },
+    {
+      "id": "527ab2f3-46aa-45e3-aca7-1851827a6d9c",
+      "name": "CW Create Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/conversations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({source_id:$json.source_id,contact_id:$json.contact_id,inbox_id:17,status:'open'}) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "af73433e-306d-4d31-b288-3c936282578a",
+      "name": "New Conversation Ready",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const id=$json.id || $json.payload?.id; if(!id)throw new Error('No Chatwoot conversation ID'); return {json:{conv_id:id}};"
+      }
+    },
+    {
+      "id": "5763caa7-b145-4c3a-a37c-b24f222b7a1a",
+      "name": "Conversation Ready",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {json:$json};"
+      }
+    },
+    {
+      "id": "fdb39501-6f26-4c7d-b569-bce7701b3b84",
+      "name": "CW Post Interview Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4320,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/conversations/{{ $('Conversation Ready').first().json.conv_id }}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({content:$('Prepare Interview Message').first().json.content,message_type:'outgoing',private:false}) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "ce8ddb80-ca4d-40c4-b060-b55bbf5ca9b1",
+      "name": "Chatwoot Submission Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4560,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const m=$json; const p=$('Prepare Interview Message').first().json;\nif(!m.id)throw new Error('Chatwoot did not confirm message creation');\nif(m.message_type!==1 && m.message_type!=='outgoing')throw new Error('Chatwoot message is not outgoing');\nif(m.private===true)throw new Error('Chatwoot message was created as a private note');\nif(String(m.sender?.type || '').toLowerCase()!=='user')throw new Error('Chatwoot sender is not compatible with the existing Telnyx relay');\nreturn {json:{Id:p.queue_id,phone:p.phone,message:p.content,chatwoot_message_id:m.id,\nconversation_id:$('Conversation Ready').first().json.conv_id,status:'submitted_to_chatwoot',\ndata:{to:[p.phone],text:p.content,direction:'outbound',status:'submitted_to_chatwoot'}}};"
+      }
+    },
+    {
+      "id": "01929b1b-5cfc-45b0-b3ac-b63be9b6401a",
+      "name": "CW Get Conversation Labels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3840,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/conversations/{{ $('Conversation Ready').first().json.conv_id }}/labels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "id": "63ad4bf4-8023-4459-99d2-e5e45925b4a1",
+      "name": "CW Add Interview Label",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4080,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://chat.unitedservicesnorthwest.com/api/v1/accounts/1/conversations/{{ $('Conversation Ready').first().json.conv_id }}/labels",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({labels: [...new Set([...($json.payload || []), 'interview'])]}) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED_CREDENTIAL_ID",
+          "name": "REDACTED_CREDENTIAL_NAME"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Interview SMS Input": {
+      "main": [
+        [
+          {
+            "node": "Prepare Interview Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Interview Message": {
+      "main": [
+        [
+          {
+            "node": "CW Find Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Find Contact": {
+      "main": [
+        [
+          {
+            "node": "Contact Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact Exists": {
+      "main": [
+        [
+          {
+            "node": "Existing Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CW Create Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Existing Contact": {
+      "main": [
+        [
+          {
+            "node": "Inbox Linked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inbox Linked": {
+      "main": [
+        [
+          {
+            "node": "Contact Ready",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CW Link Inbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Link Inbox": {
+      "main": [
+        [
+          {
+            "node": "Linked Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Linked Contact": {
+      "main": [
+        [
+          {
+            "node": "Contact Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Create Contact": {
+      "main": [
+        [
+          {
+            "node": "Created Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Created Contact": {
+      "main": [
+        [
+          {
+            "node": "Contact Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact Ready": {
+      "main": [
+        [
+          {
+            "node": "CW List Conversations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW List Conversations": {
+      "main": [
+        [
+          {
+            "node": "Resolve Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Conversation": {
+      "main": [
+        [
+          {
+            "node": "Conversation Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conversation Exists": {
+      "main": [
+        [
+          {
+            "node": "Conversation Open",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CW Create Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conversation Open": {
+      "main": [
+        [
+          {
+            "node": "Existing Conversation Ready",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CW Reopen Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Reopen Conversation": {
+      "main": [
+        [
+          {
+            "node": "Existing Conversation Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Existing Conversation Ready": {
+      "main": [
+        [
+          {
+            "node": "Conversation Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Create Conversation": {
+      "main": [
+        [
+          {
+            "node": "New Conversation Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Conversation Ready": {
+      "main": [
+        [
+          {
+            "node": "Conversation Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conversation Ready": {
+      "main": [
+        [
+          {
+            "node": "CW Get Conversation Labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Post Interview Message": {
+      "main": [
+        [
+          {
+            "node": "Chatwoot Submission Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Get Conversation Labels": {
+      "main": [
+        [
+          {
+            "node": "CW Add Interview Label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CW Add Interview Label": {
+      "main": [
+        [
+          {
+            "node": "CW Post Interview Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}
